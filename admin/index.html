@@ -274,7 +274,6 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const API_KEY = 'AIzaSyBDuvhx4Uj4K0lmDZbUO8iRNb3FNK-qI7w';
 const ADMIN_EMAILS = ['hussain@gmail.com'];
-let masterKey = null;
 
 // --- Toast ---
 function toast(msg, type = 'info') {
@@ -318,10 +317,6 @@ onAuthStateChanged(auth, async (user) => {
       $('mainApp').classList.remove('hidden');
       $('adminEmail').textContent = user.email;
       $('loader').classList.add('hidden');
-      try {
-        const encDoc = await getDoc(doc(db, 'config', 'encryption'));
-        masterKey = encDoc.exists() ? encDoc.data().masterKey : null;
-      } catch(e) { console.warn('No encryption key yet'); }
       loadDashboard();
       loadUsers();
       loadEndpoints();
@@ -536,24 +531,42 @@ window.saveEndpoint = async (e) => {
   e.preventDefault();
   const name = $('epName').value, url = $('epUrl').value, active = $('epActive').checked;
   try {
-    // Simple base64 encoding if no master key
-    const encoded = masterKey ? btoa(url) : btoa(url);
+    // Simple base64 encoding (matches dashboard decoder)
+    const encoded = btoa(url);
     const data = { name, encryptedUrl: encoded, isActive: active, updatedAt: serverTimestamp() };
     const id = $('epId').value;
     if (id) { await updateDoc(doc(db, 'endpoints', id), data); }
     else { data.createdAt = serverTimestamp(); await addDoc(collection(db, 'endpoints'), data); }
+    await syncPublicEndpoint();
     toast('✅ Endpoint saved', 'success');
     $('endpointModal').classList.add('hidden'); loadEndpoints();
   } catch(err) { toast('Error: '+err.message, 'error'); }
 };
 
+// Publish the active endpoint to config/public so signed-in users'
+// dashboards can read it (endpoints collection stays admin-only).
+async function syncPublicEndpoint() {
+  try {
+    const snap = await getDocs(query(collection(db, 'endpoints'), where('isActive', '==', true)));
+    let url = null;
+    snap.forEach(d => { if (!url && d.data().encryptedUrl) url = d.data().encryptedUrl; });
+    if (url) {
+      await setDoc(doc(db, 'config', 'public'), { activeEndpointUrl: url, updatedAt: serverTimestamp() });
+    } else {
+      await setDoc(doc(db, 'config', 'public'), { activeEndpointUrl: null, updatedAt: serverTimestamp() });
+    }
+  } catch(e) { console.error('syncPublicEndpoint error:', e); }
+}
+
 window.toggleEp = async (id, cur) => {
   await updateDoc(doc(db, 'endpoints', id), { isActive: !cur, updatedAt: serverTimestamp() });
+  await syncPublicEndpoint();
   toast('✅ Toggled', 'success'); loadEndpoints();
 };
 window.deleteEp = async (id) => {
   if (!confirm('Delete this endpoint?')) return;
   await deleteDoc(doc(db, 'endpoints', id));
+  await syncPublicEndpoint();
   toast('✅ Deleted', 'success'); loadEndpoints();
 };
 

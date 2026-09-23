@@ -35,7 +35,12 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
-    // Config — admin only
+    // Config — admin only, except the published public doc which
+    // signed-in users may read (active endpoint for the dashboard)
+    match /config/public {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
     match /config/{docId} {
       allow read: if isAdmin();
       allow write: if isAdmin();

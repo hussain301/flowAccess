@@ -1,55 +1,89 @@
 // ============================================================
-// FlowAccess — Flow Guard v5 (flow.google.com)
-// Features: Fake credits badge, projects blur, save project,
-//           sign-out block, account hide, keyboard block
+// FlowAccess — Flow Guard v6 (flow.google.com)
+// Features: Fake credits on Flow's REAL credit elements,
+//           projects blur, save project, sign-out block,
+//           account hide, keyboard block
+//
+// Credit display technique: Flow's own credit anchors are
+// targeted and stamped with data-* attributes; injected CSS
+// hides their original content and renders the fake values
+// via ::after { content: attr(...) }. This survives Flow's
+// SPA re-renders because the CSS applies automatically.
 // ============================================================
 
 (() => {
     'use strict';
 
+    // ============================
+    // STATE
+    // ============================
     let fakeBalance = 45000;
-    let lastDeductTime = 0;
     let fakeModelName = '';
     let savedProjectUrl = null;
+    let lastGenerateClick = 0;
 
+    // Per-model generation cost (displayed + deducted)
     const creditMap = {
-        'Gemini 2.0 Flash': 30, 'Gemini 1.5 Pro': 80,
-        'Gemini 1.5 Flash': 20, 'Gemini 2.5 Pro': 150,
-        'Imagen 3': 100, 'Veo 2': 200, 'default': 50
+        'Omni 1.1 Flash': 12,
+        'Veo 3.1 - Lite': 5,
+        'Veo 3.1 - Fast': 10,
+        'Veo 3.1 - Quality': 100,
+        'default': 50
     };
+
+    // Real Flow credit elements (stable across re-renders)
+    const BALANCE_ANCHOR_SEL = "a[href*='flow_ai_credits_page']";
+    const MODEL_COST_ANCHOR_SEL = "a[href*='g1_ai_credit_menu']";
 
     if (typeof chrome !== 'undefined' && chrome.storage) {
         chrome.storage.local.get(['fakeBalance', 'savedProjectUrl'], r => {
-            if (r.fakeBalance !== undefined) fakeBalance = r.fakeBalance;
+            if (typeof r.fakeBalance === 'number') fakeBalance = r.fakeBalance;
             if (r.savedProjectUrl) savedProjectUrl = r.savedProjectUrl;
         });
     }
 
+    function persistBalance() {
+        if (typeof chrome !== 'undefined' && chrome.storage) {
+            chrome.storage.local.set({ fakeBalance });
+        }
+    }
+
     // ============================
-    // CSS
+    // CSS — render fake values on Flow's own elements
     // ============================
     const style = document.createElement('style');
+    style.id = 'fa-guard-style';
     style.textContent = `
-        /* --- Fake Credit Badge --- */
-        #fa-credit-badge {
-            position: fixed !important;
-            top: 10px !important;
-            right: 180px !important;
-            background: linear-gradient(135deg, #1a1a2e, #16213e) !important;
-            color: #4ade80 !important;
-            padding: 6px 16px !important;
-            border-radius: 20px !important;
-            font-family: 'Google Sans', Roboto, sans-serif !important;
-            font-size: 13px !important;
-            font-weight: 600 !important;
-            z-index: 999999 !important;
-            border: 1px solid rgba(74,222,128,0.3) !important;
-            display: flex !important;
-            align-items: center !important;
-            gap: 6px !important;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.3) !important;
-            user-select: none !important;
+        /* --- Fake balance on Flow's real credit link --- */
+        ${BALANCE_ANCHOR_SEL} {
+            font-size: 0 !important;
+            color: transparent !important;
             pointer-events: none !important;
+            position: relative !important;
+            white-space: nowrap !important;
+        }
+        ${BALANCE_ANCHOR_SEL} > * { display: none !important; }
+        ${BALANCE_ANCHOR_SEL}::after {
+            content: attr(data-fa-credits) " credits" !important;
+            font-size: 14px !important;
+            color: #e8eaed !important;
+            visibility: visible !important;
+            white-space: nowrap !important;
+        }
+
+        /* --- Fake per-model cost on Flow's credit menu link --- */
+        ${MODEL_COST_ANCHOR_SEL} {
+            color: transparent !important;
+            position: relative !important;
+            white-space: nowrap !important;
+        }
+        ${MODEL_COST_ANCHOR_SEL} > * { display: none !important; }
+        ${MODEL_COST_ANCHOR_SEL}::after {
+            content: attr(data-fa-model-cost) " credits" !important;
+            font-size: 12px !important;
+            color: #9aa0a6 !important;
+            visibility: visible !important;
+            white-space: nowrap !important;
         }
 
         /* --- Blurred Project Card --- */
@@ -62,7 +96,7 @@
             overflow: hidden !important;
         }
         [data-fa-blur="true"]::after {
-            content: "🔒" !important;
+            content: "\\1F512" !important;
             position: absolute !important;
             top: 50% !important;
             left: 50% !important;
@@ -119,47 +153,91 @@
     (document.head || document.documentElement).appendChild(style);
 
     // ============================
-    // 1. FAKE CREDIT BADGE
+    // 1. FAKE CREDITS ON REAL FLOW ELEMENTS
     // ============================
-    function showCreditBadge() {
-        let badge = document.getElementById('fa-credit-badge');
-        if (!badge && document.body) {
-            badge = document.createElement('div');
-            badge.id = 'fa-credit-badge';
-            document.body.appendChild(badge);
+    function renderFakeCredits() {
+        // Main balance anchor
+        const balanceAnchor = document.querySelector(BALANCE_ANCHOR_SEL);
+        if (balanceAnchor) {
+            const val = String(fakeBalance);
+            if (balanceAnchor.getAttribute('data-fa-credits') !== val) {
+                balanceAnchor.setAttribute('data-fa-credits', val);
+            }
         }
-        if (badge) badge.innerHTML = `💎 <span>${fakeBalance.toLocaleString()}</span> credits`;
+
+        // Per-model cost anchor
+        const costAnchor = document.querySelector(MODEL_COST_ANCHOR_SEL);
+        const cost = creditMap[fakeModelName];
+        if (costAnchor && cost !== undefined) {
+            const val = String(cost);
+            if (costAnchor.getAttribute('data-fa-model-cost') !== val) {
+                costAnchor.setAttribute('data-fa-model-cost', val);
+            }
+        }
     }
 
-    function deductCredits() {
+    // Re-stamp quickly when Flow re-renders (SPA)
+    const creditObserver = new MutationObserver(() => renderFakeCredits());
+    function watchCredits() {
+        if (document.body && !watchCredits._on) {
+            creditObserver.observe(document.body, {
+                childList: true, subtree: true, attributes: true,
+                attributeFilter: ['href', 'data-fa-credits', 'data-fa-model-cost']
+            });
+            watchCredits._on = true;
+        }
+    }
+
+    function deductForGeneration() {
         const now = Date.now();
-        if (now - lastDeductTime < 3000) return;
-        const cost = creditMap[fakeModelName] || creditMap['default'];
+        if (now - lastGenerateClick < 5000) return; // throttle double clicks
+        lastGenerateClick = now;
+        const cost = creditMap[fakeModelName] !== undefined ? creditMap[fakeModelName] : creditMap['default'];
         fakeBalance = Math.max(0, fakeBalance - cost);
-        lastDeductTime = now;
-        showCreditBadge();
-        if (typeof chrome !== 'undefined' && chrome.storage) chrome.storage.local.set({ fakeBalance });
+        persistBalance();
+        renderFakeCredits();
+    }
+
+    function looksLikeGenerateButton(el) {
+        const t = (el.textContent || '').trim().toLowerCase();
+        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+        return /^(generate|create|submit|go|render)$/.test(t) || /generate|create video|create image/.test(aria);
     }
 
     // ============================
-    // 2. BLUR OTHER PROJECTS (ONLY on home page https://flow.google.com/)
+    // 2. MODEL DETECTION
+    // ============================
+    function detectModel() {
+        // Prefer the actually-selected option
+        const selected = document.querySelector('button[aria-selected="true"], [role="option"][aria-selected="true"]');
+        const candidates = selected ? [selected] : Array.from(document.querySelectorAll('button'));
+        for (const b of candidates) {
+            const t = (b.textContent || '').trim();
+            if (t && t.length < 40 && creditMap[t] !== undefined) {
+                if (fakeModelName !== t) {
+                    fakeModelName = t;
+                    renderFakeCredits();
+                }
+                return;
+            }
+        }
+    }
+
+    // ============================
+    // 3. BLUR OTHER PROJECTS (ONLY on home page)
     // ============================
     function blurOtherProjects() {
         const path = window.location.pathname;
-        
-        // ONLY blur on home page — nowhere else
+
         if (path !== '/' && path !== '') {
-            // Remove any blur that might exist
             document.querySelectorAll('[data-fa-blur]').forEach(el => el.removeAttribute('data-fa-blur'));
             return;
         }
 
-        // Find all project links/cards on home gallery
         const projectLinks = document.querySelectorAll('a[href*="/project/"]');
-        
+
         projectLinks.forEach(link => {
             const href = link.getAttribute('href') || '';
-            // Find the visual card container (walk up a few levels)
             let card = link;
             for (let i = 0; i < 4; i++) {
                 if (card.parentElement && card.parentElement !== document.body) {
@@ -167,14 +245,12 @@
                 } else break;
             }
 
-            // Don't blur "New project" card
             const text = (card.textContent || '').toLowerCase();
             if (text.includes('new project')) {
                 card.removeAttribute('data-fa-blur');
                 return;
             }
 
-            // Don't blur our saved project
             if (savedProjectUrl) {
                 const projectId = savedProjectUrl.split('/project/')[1];
                 if (projectId && href.includes(projectId)) {
@@ -183,13 +259,12 @@
                 }
             }
 
-            // Blur this project
             card.setAttribute('data-fa-blur', 'true');
         });
     }
 
     // ============================
-    // 3. SAVE PROJECT BUTTON
+    // 4. SAVE PROJECT BUTTON
     // ============================
     function showSaveButton() {
         if (document.getElementById('fa-save-btn')) return;
@@ -202,19 +277,19 @@
         btn.id = 'fa-save-btn';
 
         if (savedProjectUrl === cleanUrl) {
-            btn.innerHTML = '✅ Project Saved';
+            btn.textContent = '✅ Project Saved';
             btn.classList.add('saved');
         } else {
-            btn.innerHTML = '💾 Save Project';
+            btn.textContent = '💾 Save Project';
         }
 
         btn.onclick = () => {
             savedProjectUrl = cleanUrl;
             if (typeof chrome !== 'undefined' && chrome.storage) chrome.storage.local.set({ savedProjectUrl: cleanUrl });
-            navigator.clipboard.writeText(cleanUrl).catch(() => {});
-            btn.innerHTML = '✅ Saved & Copied!';
+            if (navigator.clipboard) navigator.clipboard.writeText(cleanUrl).catch(() => {});
+            btn.textContent = '✅ Saved & Copied!';
             btn.classList.add('saved');
-            setTimeout(() => { btn.innerHTML = '✅ Project Saved'; }, 2000);
+            setTimeout(() => { btn.textContent = '✅ Project Saved'; }, 2000);
         };
         document.body.appendChild(btn);
     }
@@ -228,13 +303,13 @@
     }
 
     // ============================
-    // 4. SIGN-OUT PURGE
+    // 5. SIGN-OUT PURGE
     // ============================
     function purgeSignout() {
         document.querySelectorAll('button, a, span, div, p, [role="menuitem"]').forEach(el => {
             if (el.children.length > 5) return;
             const t = (el.textContent || '').trim().toLowerCase();
-            if (t === 'sign out' || t === 'log out' || t === 'switch account' || 
+            if (t === 'sign out' || t === 'log out' || t === 'switch account' ||
                 t === 'add another account' || t === 'manage your google account' ||
                 t.includes('sign out')) {
                 el.setAttribute('data-fa-hidden', '1');
@@ -245,7 +320,7 @@
     }
 
     // ============================
-    // 5. HIDE ACCOUNT INFO
+    // 6. HIDE ACCOUNT INFO
     // ============================
     function hideAccount() {
         document.querySelectorAll('img').forEach(img => {
@@ -265,7 +340,7 @@
     }
 
     // ============================
-    // 6. KEYBOARD BLOCK
+    // 7. KEYBOARD + CONTEXT MENU BLOCK
     // ============================
     document.addEventListener('keydown', e => {
         if (e.key === 'F12' || e.keyCode === 123 ||
@@ -277,7 +352,7 @@
     document.addEventListener('contextmenu', e => { e.preventDefault(); }, true);
 
     // ============================
-    // 7. CLICK INTERCEPT
+    // 8. CLICK INTERCEPT (sign-out block + generation deduction)
     // ============================
     document.addEventListener('click', e => {
         const t = e.target.closest('a, button, [role="menuitem"]');
@@ -288,27 +363,25 @@
             txt.includes('sign out') || txt.includes('switch account')) {
             e.preventDefault(); e.stopImmediatePropagation(); return false;
         }
-        deductCredits();
+        if (t.tagName === 'BUTTON' && looksLikeGenerateButton(t)) {
+            deductForGeneration();
+        }
     }, true);
 
     // ============================
-    // 8. PERIODIC ENFORCEMENT
+    // 9. PERIODIC ENFORCEMENT
     // ============================
     setInterval(() => {
-        showCreditBadge();
+        watchCredits();
+        renderFakeCredits();
+        detectModel();
         purgeSignout();
         hideAccount();
         blurOtherProjects();
-
-        // Auto-detect model
-        document.querySelectorAll('button').forEach(b => {
-            const t = (b.textContent || '').trim();
-            if (t.match(/^(Gemini|Imagen|Veo)\s/) && t.length < 40) fakeModelName = t;
-        });
     }, 2000);
 
     // ============================
-    // 9. DEVTOOLS DETECTION
+    // 10. DEVTOOLS DETECTION (Flow pages only)
     // ============================
     setInterval(() => {
         const t = Date.now(); debugger;
@@ -319,7 +392,9 @@
     // INIT
     // ============================
     function init() {
-        showCreditBadge();
+        watchCredits();
+        renderFakeCredits();
+        detectModel();
         showSaveButton();
         purgeSignout();
         hideAccount();
@@ -342,5 +417,5 @@
         }
     }, 500);
 
-    console.log('[FlowAccess] Flow Guard v5 active');
+    console.log('[FlowAccess] Flow Guard v6 active');
 })();

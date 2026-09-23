@@ -124,19 +124,21 @@ function setExtensionReady() {
 }
 
 // === LOAD ACTIVE ENDPOINT ===
+// Reads the published endpoint from config/public (readable by all
+// signed-in users). The raw endpoints collection stays admin-only.
 async function loadActiveEndpoint() {
   try {
-    const snap = await getDocs(collection(db, 'endpoints'));
-    snap.forEach(d => {
-      const ep = d.data();
-      if (ep.isActive && !activeEndpointUrl) {
-        try { activeEndpointUrl = atob(ep.encryptedUrl); } 
-        catch(e) { activeEndpointUrl = ep.encryptedUrl; }
+    const pubDoc = await getDoc(doc(db, 'config', 'public'));
+    if (pubDoc.exists()) {
+      const data = pubDoc.data();
+      if (data.activeEndpointUrl) {
+        try { activeEndpointUrl = atob(data.activeEndpointUrl); }
+        catch(e) { activeEndpointUrl = data.activeEndpointUrl; }
       }
-    });
+    }
     console.log('[Dashboard] Endpoint loaded:', activeEndpointUrl ? 'YES' : 'NONE');
   } catch(e) {
-    console.error("Error loading endpoints:", e);
+    console.error("Error loading endpoint:", e);
   }
 }
 
@@ -166,14 +168,21 @@ async function loadUsageData() {
     
     sessions.forEach(({ id, data }) => {
       let durationMs = data.durationMs || 0;
-      
-      // Active session — resume timer
+
+      // Active session — check liveness via heartbeat before resuming timer
       if (data.status === 'Active' && data.startedAt) {
-        const started = data.startedAt.toDate();
-        durationMs = now.getTime() - started.getTime();
-        currentSessionId = id;
-        isPaused = false;
-        startTimer();
+        if (isSessionStale(data, now)) {
+          // Browser was closed / dashboard gone — freeze it as Expired
+          expireStaleSession(id, data, now);
+          durationMs = data.durationMs || (now.getTime() - startMs);
+        } else {
+          const started = data.startedAt.toDate();
+          durationMs = now.getTime() - started.getTime();
+          currentSessionId = id;
+          isPaused = false;
+          startTimer();
+          startHeartbeat();
+        }
       }
       
       // Paused session — show paused state
@@ -207,6 +216,66 @@ async function loadUsageData() {
     console.error("Error loading usage:", error);
     updateTimerUI();
     updateButtonStates();
+  }
+}
+
+// === SESSION HEARTBEAT & STALE RECONCILIATION ===
+// While a session is Active, the dashboard writes a heartbeat every
+// 60s. If the browser was closed without pausing, the next dashboard
+// load finds a stale heartbeat and freezes the session as Expired
+// instead of letting wall-clock usage accrue forever.
+
+const HEARTBEAT_INTERVAL_MS = 60 * 1000;
+const STALE_AFTER_MS = 10 * 60 * 1000;
+let heartbeatInterval = null;
+
+function startHeartbeat() {
+  stopHeartbeat();
+  heartbeatInterval = setInterval(async () => {
+    if (!currentSessionId || isPaused) return;
+    try {
+      await updateDoc(doc(db, 'sessions', currentSessionId), {
+        lastHeartbeat: serverTimestamp()
+      });
+    } catch(e) {
+      console.warn('[Dashboard] Heartbeat failed:', e.message);
+    }
+  }, HEARTBEAT_INTERVAL_MS);
+}
+
+function stopHeartbeat() {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  heartbeatInterval = null;
+}
+
+function heartbeatAgeMs(data, now) {
+  const hb = data.lastHeartbeat;
+  const hbMs = hb && hb.toMillis ? hb.toMillis() : 0;
+  return hbMs ? now.getTime() - hbMs : Infinity;
+}
+
+function isSessionStale(data, now) {
+  const age = heartbeatAgeMs(data, now);
+  if (age !== Infinity) return age > STALE_AFTER_MS;
+  // Legacy sessions without heartbeat: stale if started > 30 min ago
+  const startMs = data.startedAt && data.startedAt.toMillis ? data.startedAt.toMillis() : 0;
+  return startMs ? (now.getTime() - startMs) > 30 * 60 * 1000 : false;
+}
+
+async function expireStaleSession(id, data, now) {
+  try {
+    const startMs = data.startedAt && data.startedAt.toMillis ? data.startedAt.toMillis() : now.getTime();
+    const durationMs = Math.max(0, now.getTime() - startMs);
+    await updateDoc(doc(db, 'sessions', id), {
+      status: 'Expired',
+      endedAt: serverTimestamp(),
+      endTime: serverTimestamp(),
+      durationMs: durationMs,
+      expiredReason: 'stale-heartbeat'
+    });
+    console.log('[Dashboard] Expired stale session:', id);
+  } catch(e) {
+    console.warn('[Dashboard] Could not expire stale session:', e.message);
   }
 }
 
@@ -295,13 +364,15 @@ function startTimer() {
 }
 
 // === EXTENSION COMMUNICATION ===
+// Messages are posted to our own origin only; the content-script
+// bridge additionally checks the origin against its allowlist.
 function sendToExtension(action, payload) {
   window.postMessage({
     source: 'FLOW_ACCESS_WEB',
     id: action + '-' + Date.now(),
     action: action,
     payload: payload || {}
-  }, '*');
+  }, window.location.origin);
 }
 
 // Listen for extension replies
@@ -341,6 +412,7 @@ startFlowBtn.addEventListener('click', async () => {
       endedAt: null,
       endTime: null,
       durationMs: 0,
+      lastHeartbeat: serverTimestamp(),
       status: 'Active'
     });
     
@@ -353,9 +425,10 @@ startFlowBtn.addEventListener('click', async () => {
       sessionId: currentSessionId
     });
     
-    // 3. Start countdown timer
+    // 3. Start countdown timer + heartbeat
     showToast("✅ Session started! Opening Flow...", "success");
     startTimer();
+    startHeartbeat();
     updateButtonStates();
     
   } catch (error) {
@@ -379,6 +452,7 @@ async function pauseSession() {
   try {
     isPaused = true;
     if (timerInterval) clearInterval(timerInterval);
+    stopHeartbeat();
     
     // Update session status in Firestore
     const sessionRef = doc(db, 'sessions', currentSessionId);
@@ -441,6 +515,7 @@ resumeFlowBtn.addEventListener('click', async () => {
       endedAt: null,
       endTime: null,
       durationMs: 0,
+      lastHeartbeat: serverTimestamp(),
       status: 'Active',
       resumedFrom: currentSessionId
     });
@@ -448,8 +523,9 @@ resumeFlowBtn.addEventListener('click', async () => {
     currentSessionId = sessionRef.id;
     isPaused = false;
     
-    // 3. Restart timer
+    // 3. Restart timer + heartbeat
     startTimer();
+    startHeartbeat();
     updateButtonStates();
     
     showToast("▶ Session resumed! Opening Flow...", "success");
@@ -487,6 +563,7 @@ async function endSession(status = 'Completed') {
     
     currentSessionId = null;
     if (timerInterval) clearInterval(timerInterval);
+    stopHeartbeat();
     updateButtonStates();
     
   } catch (error) {

@@ -4,80 +4,78 @@
 // ============================================================
 
 // ========================
-// 1. COOKIE INJECTION
+// 1. COOKIE INJECTION (single implementation)
 // ========================
 
 /**
- * Injects an array of cookies into the browser using chrome.cookies.set
- * @param {Array} cookies - Array of cookie objects
- * @param {string} targetUrl - URL to navigate after injection
- * @param {number|null} tabId - Optional specific tab to use
+ * Normalize one cookie object into chrome.cookies.set details.
+ * Returns null when the cookie entry is invalid.
  */
-async function injectCookies(cookies, targetUrl, tabId) {
-    const successList = [];
-    const failList = [];
+function toCookieDetails(c) {
+    if (!c || typeof c.name !== 'string' || typeof c.value !== 'string') return null;
+    if (c.name.length === 0 || c.name.length > 256) return null;
 
-    for (const c of cookies) {
-        try {
-            let cookieDomain = c.domain || '.google.com';
-            if (!cookieDomain.startsWith('.')) cookieDomain = '.' + cookieDomain;
+    let cookieDomain = typeof c.domain === 'string' && c.domain ? c.domain : '.google.com';
+    if (!cookieDomain.startsWith('.')) cookieDomain = '.' + cookieDomain;
 
-            const cookieUrl = 'https://flow.google.com';
-            const details = {
-                url: cookieUrl,
-                name: c.name,
-                value: c.value,
-                domain: cookieDomain,
-                path: c.path || '/',
-                secure: !!c.secure,
-                httpOnly: !!c.httpOnly,
-                sameSite: (c.sameSite && ['no_restriction', 'lax', 'strict'].includes(String(c.sameSite).toLowerCase()))
-                    ? String(c.sameSite).toLowerCase()
-                    : 'lax'
-            };
+    const host = cookieDomain.startsWith('.') ? cookieDomain.slice(1) : cookieDomain;
+    const url = `https://${host}${typeof c.path === 'string' && c.path.startsWith('/') ? c.path : '/'}`;
 
-            if (c.expirationDate) {
-                details.expirationDate = c.expirationDate;
-            }
+    const details = {
+        url,
+        name: c.name,
+        value: c.value,
+        domain: cookieDomain,
+        path: typeof c.path === 'string' && c.path ? c.path : '/',
+        secure: c.secure !== false,
+        httpOnly: !!c.httpOnly,
+        sameSite: (['no_restriction', 'lax', 'strict'].includes(String(c.sameSite || '').toLowerCase()))
+            ? String(c.sameSite).toLowerCase()
+            : 'lax'
+    };
 
-            await chrome.cookies.set(details);
-            successList.push(c.name);
-        } catch (err) {
-            console.warn(`[FlowAccess] Cookie set error for ${c.name}:`, err);
-            failList.push({ name: c.name, error: err.message });
-        }
+    if (typeof c.expirationDate === 'number' && c.expirationDate > 0) {
+        details.expirationDate = c.expirationDate;
     }
 
-    console.log(`[FlowAccess] Injected ${successList.length} cookies, ${failList.length} failed`);
-
-    // Mark session in the tab
-    const activeTabId = tabId || await getActiveTabId();
-    if (activeTabId) {
-        try {
-            await chrome.scripting.executeScript({
-                target: { tabId: activeTabId },
-                func: () => {
-                    sessionStorage.setItem('FLOW_ACCESS_SESSION', 'true');
-                    console.log('[FlowAccess] Session marked active');
-                }
-            });
-        } catch (e) { }
-
-        // Navigate to target URL
-        const finalUrl = targetUrl || 'https://flow.google.com/?pli=1';
-        chrome.tabs.update(activeTabId, { url: finalUrl, active: true }, () => {
-            setTimeout(() => {
-                chrome.tabs.reload(activeTabId, { bypassCache: true });
-            }, 600);
-        });
-    }
-
-    return { success: successList.length > 0, injected: successList.length, failed: failList.length };
+    return details;
 }
 
 /**
- * Gets the active tab ID
+ * Set a list of cookies. Returns { injected, failed }.
  */
+async function setCookieList(cookies) {
+    let injected = 0, failed = 0;
+    const list = Array.isArray(cookies) ? cookies.slice(0, 500) : [];
+    for (const c of list) {
+        try {
+            const details = toCookieDetails(c);
+            if (!details) { failed++; continue; }
+            await chrome.cookies.set(details);
+            injected++;
+        } catch (err) {
+            console.warn(`[FlowAccess] Cookie set error for ${c && c.name}:`, err);
+            failed++;
+        }
+    }
+    console.log(`[FlowAccess] Injected ${injected} cookies, ${failed} failed`);
+    return { injected, failed };
+}
+
+/**
+ * Parse an endpoint JSON body into a cookie array.
+ * Handles: { cookies: [...] }, { cookies: "<json string>" }, [...]
+ */
+function parseEndpointCookies(data) {
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.cookies)) return data.cookies;
+    if (data && typeof data.cookies === 'string') {
+        const parsed = JSON.parse(data.cookies);
+        if (Array.isArray(parsed)) return parsed;
+    }
+    throw new Error('Unknown cookie format in response');
+}
+
 async function getActiveTabId() {
     return new Promise((resolve) => {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -86,140 +84,135 @@ async function getActiveTabId() {
     });
 }
 
+async function openFlowTab(targetUrl, tabId) {
+    const finalUrl = targetUrl || 'https://flow.google.com/?pli=1';
+    const activeTabId = tabId || await getActiveTabId();
+
+    if (activeTabId) {
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: activeTabId },
+                func: () => {
+                    try { sessionStorage.setItem('FLOW_ACCESS_SESSION', 'true'); } catch (e) {}
+                }
+            });
+        } catch (e) { /* tab may not allow scripting */ }
+
+        chrome.tabs.update(activeTabId, { url: finalUrl, active: true }, () => {
+            setTimeout(() => {
+                chrome.tabs.reload(activeTabId, { bypassCache: true }).catch(() => {});
+            }, 600);
+        });
+        return activeTabId;
+    }
+
+    const tab = await chrome.tabs.create({ url: finalUrl, active: true });
+    setTimeout(() => {
+        chrome.tabs.reload(tab.id, { bypassCache: true }).catch(() => {});
+    }, 800);
+    return tab.id;
+}
+
 // ========================
 // 2. MESSAGE HANDLING
 // ========================
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    // Cookie injection request from website (via content script)
+    // Only accept messages from our own extension contexts
+    if (sender && sender.id && sender.id !== chrome.runtime.id) {
+        sendResponse({ success: false, error: 'Unauthorized sender' });
+        return false;
+    }
+
+    // Cookie injection request from website (via content script bridge)
     if (request.action === 'INJECT_COOKIES') {
-        const cookies = request.cookies;
-        const targetUrl = request.targetUrl || 'https://flow.google.com/?pli=1';
-        const tabId = sender && sender.tab ? sender.tab.id : null;
-
-        injectCookies(cookies, targetUrl, tabId)
-            .then(result => sendResponse(result))
-            .catch(err => sendResponse({ success: false, error: err.message }));
-
-        return true; // Keep channel open for async response
+        (async () => {
+            try {
+                const { injected, failed } = await setCookieList(request.cookies);
+                await openFlowTab(request.targetUrl, sender && sender.tab ? sender.tab.id : null);
+                sendResponse({ success: injected > 0, injected, failed });
+            } catch (err) {
+                sendResponse({ success: false, error: err.message });
+            }
+        })();
+        return true;
     }
 
     // Fetch cookies from endpoint URL, inject them, and open Flow
     if (request.action === 'FETCH_AND_INJECT') {
         const endpointUrl = request.endpointUrl;
-        console.log('[FlowAccess] Fetching cookies from:', endpointUrl);
+        if (typeof endpointUrl !== 'string' || !/^https:\/\//i.test(endpointUrl)) {
+            sendResponse({ success: false, error: 'Invalid endpoint URL' });
+            return false;
+        }
+        console.log('[FlowAccess] Fetching cookies from endpoint');
 
         (async () => {
             try {
-                // 1. Fetch from endpoint
                 const resp = await fetch(endpointUrl);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
 
-                // 2. Parse cookies — handle double-encoded JSON
-                let cookies;
-                if (typeof data.cookies === 'string') {
-                    cookies = JSON.parse(data.cookies); // Double-encoded
-                } else if (Array.isArray(data.cookies)) {
-                    cookies = data.cookies;
-                } else if (Array.isArray(data)) {
-                    cookies = data;
-                } else {
-                    throw new Error('Unknown cookie format in response');
-                }
-
+                const cookies = parseEndpointCookies(data);
                 console.log(`[FlowAccess] Got ${cookies.length} cookies from endpoint`);
 
-                // 3. Inject all cookies
-                let injected = 0;
-                for (const c of cookies) {
-                    try {
-                        let domain = c.domain || '.google.com';
-                        if (!domain.startsWith('.')) domain = '.' + domain;
-                        
-                        const details = {
-                            url: `https://${domain.startsWith('.') ? domain.slice(1) : domain}${c.path || '/'}`,
-                            name: c.name,
-                            value: c.value,
-                            domain: domain,
-                            path: c.path || '/',
-                            secure: c.secure !== false,
-                            httpOnly: !!c.httpOnly,
-                            sameSite: (['no_restriction','lax','strict'].includes(String(c.sameSite||'').toLowerCase()))
-                                ? String(c.sameSite).toLowerCase() : 'lax'
-                        };
-                        if (c.expirationDate) details.expirationDate = c.expirationDate;
-                        
-                        await chrome.cookies.set(details);
-                        injected++;
-                    } catch (e) {
-                        console.warn(`[FlowAccess] Cookie ${c.name} error:`, e.message);
-                    }
-                }
+                const { injected, failed } = await setCookieList(cookies);
 
-                console.log(`[FlowAccess] Injected ${injected}/${cookies.length} cookies`);
+                await openFlowTab(data.url || 'https://flow.google.com/?pli=1', null);
 
-                // 4. Open Flow in new tab
-                const targetUrl = data.url || 'https://flow.google.com/?pli=1';
-                const tab = await chrome.tabs.create({ url: targetUrl, active: true });
-
-                // 5. Reload after short delay for cookies to take effect
-                setTimeout(() => {
-                    chrome.tabs.reload(tab.id, { bypassCache: true });
-                }, 800);
-
-                sendResponse({ success: true, injected: injected, total: cookies.length });
+                sendResponse({ success: true, injected, failed, total: cookies.length });
             } catch (err) {
                 console.error('[FlowAccess] FETCH_AND_INJECT error:', err);
                 sendResponse({ success: false, error: err.message });
             }
         })();
 
-        return true; // Keep channel open for async
+        return true;
     }
 
     // Extension presence check
     if (request.action === 'PING') {
         sendResponse({ installed: true, version: chrome.runtime.getManifest().version });
-        return true;
+        return false;
     }
 
-    // Wipe all cookies (for session end / logout)
+    // Wipe Flow/Google cookies (scoped — never touches other sites' cookies)
     if (request.action === 'WIPE_COOKIES') {
-        wipeAllCookies();
-        sendResponse({ success: true });
+        wipeFlowCookies().then(() => sendResponse({ success: true }));
         return true;
     }
 
     // Close all Flow tabs (for pause/expire)
     if (request.action === 'CLOSE_FLOW_TAB') {
-        chrome.tabs.query({}, (tabs) => {
-            if (!tabs) return;
-            tabs.forEach(tab => {
-                if (tab.url && tab.url.toLowerCase().includes('flow.google.com')) {
-                    chrome.tabs.remove(tab.id).catch(() => {});
-                }
-            });
-        });
+        closeFlowTabs();
         sendResponse({ success: true });
+        return false;
+    }
+
+    // Stop Flow — wipe Flow cookies AND close Flow tabs
+    if (request.action === 'STOP_FLOW') {
+        (async () => {
+            await wipeFlowCookies();
+            closeFlowTabs();
+            sendResponse({ success: true });
+        })();
         return true;
     }
 
-    // Stop Flow — wipe cookies AND close Flow tabs
-    if (request.action === 'STOP_FLOW') {
-        wipeAllCookies();
-        chrome.tabs.query({}, (tabs) => {
-            if (!tabs) return;
-            tabs.forEach(tab => {
-                if (tab.url && tab.url.toLowerCase().includes('flow.google.com')) {
-                    chrome.tabs.remove(tab.id).catch(() => {});
-                }
-            });
-        });
-        sendResponse({ success: true });
-        return true;
-    }
+    sendResponse({ success: false, error: 'Unknown action' });
+    return false;
 });
+
+function closeFlowTabs() {
+    chrome.tabs.query({}, (tabs) => {
+        if (!tabs) return;
+        tabs.forEach(tab => {
+            if (tab.url && tab.url.toLowerCase().includes('flow.google.com')) {
+                chrome.tabs.remove(tab.id).catch(() => {});
+            }
+        });
+    });
+}
 
 // ========================
 // 3. TAB / URL BLOCKING
@@ -252,7 +245,6 @@ function checkAndBlockTab(tabId, url) {
     try {
         const lowerUrl = url.toLowerCase();
 
-        // Block browser internal pages
         for (const prefix of blockedPrefixes) {
             if (lowerUrl.startsWith(prefix)) {
                 chrome.tabs.remove(tabId).catch(() => { });
@@ -268,10 +260,8 @@ function checkAndBlockTab(tabId, url) {
         const urlObj = new URL(url);
         const hostname = urlObj.hostname.toLowerCase();
 
-        // Allow flow.google.com
         if (hostname === "flow.google.com") return;
 
-        // Block other Google services
         if (blockedDomains.includes(hostname)) {
             chrome.tabs.remove(tabId).catch(() => { });
         }
@@ -284,7 +274,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const url = (tab && (tab.url || tab.pendingUrl)) || (changeInfo && changeInfo.url);
     checkAndBlockTab(tabId, url);
 
-    // Single Flow tab enforcement
     if (url && url.toLowerCase().includes('flow.google.com')) {
         enforceSingleFlowTab(tabId);
     }
@@ -308,7 +297,6 @@ function enforceSingleFlowTab(newTabId) {
         );
 
         if (flowTabs.length > 0) {
-            // Existing flow tab found — close the new one, focus the existing
             chrome.tabs.remove(newTabId).catch(() => { });
             chrome.tabs.update(flowTabs[0].id, { active: true });
             if (flowTabs[0].windowId) {
@@ -320,48 +308,42 @@ function enforceSingleFlowTab(newTabId) {
 }
 
 // ========================
-// 5. COOKIE WIPE (Session End)
+// 5. SCOPED COOKIE WIPE (Session End)
 // ========================
+// Only removes Google/Flow cookies. Other sites' cookies and
+// unrelated tabs are never touched.
 
-function wipeAllCookies() {
-    console.warn("[FlowAccess] Wiping all cookies...");
+const WIPE_DOMAIN_SUFFIXES = ['google.com', 'flow.google.com', 'gstatic.com'];
 
+function isWipeableCookie(cookie) {
+    const d = (cookie.domain || '').toLowerCase().replace(/^\./, '');
+    return WIPE_DOMAIN_SUFFIXES.some(suffix => d === suffix || d.endsWith('.' + suffix));
+}
+
+function removeOneCookie(cookie) {
+    return new Promise((resolve) => {
+        try {
+            const protocol = cookie.secure ? 'https:' : 'http:';
+            const domain = cookie.domain.startsWith('.') ? cookie.domain.slice(1) : cookie.domain;
+            const url = `${protocol}//${domain}${cookie.path || '/'}`;
+            chrome.cookies.remove({ url, name: cookie.name, storeId: cookie.storeId }, () => resolve());
+        } catch (e) {
+            resolve();
+        }
+    });
+}
+
+async function wipeFlowCookies() {
+    console.warn('[FlowAccess] Wiping Flow/Google cookies (scoped)...');
     try {
-        chrome.browsingData.removeCookies({ "since": 0 }, () => {
-            console.log("[FlowAccess] browsingData.removeCookies completed.");
-        });
-    } catch (e) { }
-
-    try {
-        chrome.browsingData.remove({ "since": 0 }, { "cookies": true }, () => {
-            console.log("[FlowAccess] browsingData.remove cookies completed.");
-        });
-    } catch (e) { }
-
-    try {
-        chrome.cookies.getAll({}, (cookies) => {
-            if (!cookies) return;
-            cookies.forEach((c) => {
-                const protocol = c.secure ? "https:" : "http:";
-                const domain = c.domain.startsWith(".") ? c.domain.slice(1) : c.domain;
-                const url = `${protocol}//${domain}${c.path}`;
-                chrome.cookies.remove({ url: url, name: c.name, storeId: c.storeId }, () => { });
-            });
-            console.log(`[FlowAccess] Individual deletion of ${cookies.length} cookies triggered.`);
-        });
-    } catch (e) { }
-
-    // Reload all open tabs
-    try {
-        chrome.tabs.query({}, (tabs) => {
-            if (!tabs) return;
-            tabs.forEach((tab) => {
-                if (tab && tab.id && tab.url && !tab.url.startsWith("chrome://") && !tab.url.startsWith("edge://")) {
-                    chrome.tabs.reload(tab.id).catch(() => { });
-                }
-            });
-        });
-    } catch (e) { }
+        const all = await chrome.cookies.getAll({});
+        const targets = (all || []).filter(isWipeableCookie);
+        await Promise.all(targets.map(removeOneCookie));
+        console.log(`[FlowAccess] Removed ${targets.length} Flow/Google cookies.`);
+    } catch (e) {
+        console.warn('[FlowAccess] Scoped wipe error:', e);
+    }
+    // NOTE: unrelated tabs are intentionally NOT reloaded.
 }
 
 console.log('[FlowAccess] Background service worker initialized');
@@ -369,7 +351,6 @@ console.log('[FlowAccess] Background service worker initialized');
 // ========================
 // 6. EXTENSION ENFORCEMENT
 // ========================
-// Disable ALL other extensions — only FlowAccess stays
 function enforceOnlyAllowedExtensions() {
     if (!chrome.management) return;
 
@@ -378,11 +359,8 @@ function enforceOnlyAllowedExtensions() {
     chrome.management.getAll((extensions) => {
         if (!extensions) return;
         extensions.forEach(ext => {
-            // Skip self
             if (ext.id === myId) return;
-            // Skip themes
             if (ext.type === 'theme') return;
-            // Disable everything else
             if (ext.enabled) {
                 chrome.management.setEnabled(ext.id, false, () => {
                     if (chrome.runtime.lastError) {
@@ -396,13 +374,9 @@ function enforceOnlyAllowedExtensions() {
     });
 }
 
-// Run on startup
 enforceOnlyAllowedExtensions();
-
-// Run periodically (every 30 seconds)
 setInterval(enforceOnlyAllowedExtensions, 30000);
 
-// Also run when any extension is installed/enabled
 if (chrome.management && chrome.management.onEnabled) {
     chrome.management.onEnabled.addListener((ext) => {
         if (ext.id !== chrome.runtime.id) {
@@ -422,43 +396,6 @@ if (chrome.management && chrome.management.onInstalled) {
                 });
             }, 500);
         }
-    });
-}
-
-// ========================
-// 7. KILL FLOW IF NO ACCESS
-// ========================
-function killFlowTabsIfNoAccess() {
-    // Check if we have Flow cookies
-    chrome.cookies.getAll({ domain: '.google.com' }, (cookies) => {
-        if (!cookies || cookies.length === 0) {
-            // No cookies = no access. Close Flow tabs
-            chrome.tabs.query({}, (tabs) => {
-                if (!tabs) return;
-                tabs.forEach(tab => {
-                    if (tab.url && tab.url.includes('flow.google.com')) {
-                        chrome.tabs.remove(tab.id).catch(() => {});
-                    }
-                });
-            });
-        }
-    });
-}
-
-// ========================
-// 8. RELOAD ALL TABS
-// ========================
-function reloadAllTabs() {
-    chrome.tabs.query({}, (tabs) => {
-        if (!tabs) return;
-        tabs.forEach(tab => {
-            if (tab && tab.id && tab.url && 
-                !tab.url.startsWith('chrome://') && 
-                !tab.url.startsWith('edge://') &&
-                !tab.url.startsWith('chrome-extension://')) {
-                chrome.tabs.reload(tab.id).catch(() => {});
-            }
-        });
     });
 }
 

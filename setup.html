@@ -18,9 +18,17 @@
 <body>
     <h1>🔧 FlowAccess Setup</h1>
     <p>This will create the required Firestore documents for your admin account.</p>
-    
+    <p style="color:#eab308;font-size:0.9rem;">⚠️ Run once, then delete this file from your deployed site.</p>
+
+    <div style="margin:16px 0;">
+        <label style="display:block;margin:8px 0 4px;">Admin email</label>
+        <input id="adminEmail" type="email" placeholder="admin@example.com" style="width:100%;padding:10px;border-radius:8px;border:1px solid #333;background:#111;color:#fff;">
+        <label style="display:block;margin:8px 0 4px;">Admin password</label>
+        <input id="adminPass" type="password" placeholder="••••••••" style="width:100%;padding:10px;border-radius:8px;border:1px solid #333;background:#111;color:#fff;">
+    </div>
+
     <div id="log"></div>
-    
+
     <button id="setupBtn" onclick="runSetup()">Run Setup</button>
 
     <script type="module">
@@ -50,38 +58,46 @@
 
         window.runSetup = async function() {
             const btn = document.getElementById('setupBtn');
+            const email = document.getElementById('adminEmail').value.trim();
+            const password = document.getElementById('adminPass').value;
+            if (!email || !password) {
+                log('❌ Please enter admin email and password.', 'error');
+                return;
+            }
             btn.disabled = true;
             btn.textContent = 'Setting up...';
             document.getElementById('log').innerHTML = '';
 
             try {
-                // 1. Sign in as admin
-                log('⏳ Signing in as hussain@gmail.com...');
-                const cred = await signInWithEmailAndPassword(auth, 'hussain@gmail.com', '12345678');
+                // 1. Sign in as admin (account must already exist in Firebase Auth)
+                log('⏳ Signing in as ' + email + '...');
+                const cred = await signInWithEmailAndPassword(auth, email, password);
                 log('✅ Signed in! UID: ' + cred.user.uid, 'success');
 
                 // 2. Create config/admin document
                 log('⏳ Creating config/admin document...');
                 await setDoc(doc(db, 'config', 'admin'), {
-                    adminEmails: ['hussain@gmail.com'],
+                    adminEmails: [email],
                     maxSessionHours: 3,
                     rollingWindowHours: 24,
                     createdAt: serverTimestamp()
                 });
-                log('✅ config/admin created — adminEmails: ["hussain@gmail.com"]', 'success');
+                log('✅ config/admin created — adminEmails: ["' + email + '"]', 'success');
 
-                // 3. Create config/encryption document
+                // 3. Create config/encryption document with a fresh random key
                 log('⏳ Creating config/encryption document...');
+                const rand = crypto.getRandomValues(new Uint8Array(32));
+                const masterKey = Array.from(rand).map(b => b.toString(16).padStart(2, '0')).join('');
                 await setDoc(doc(db, 'config', 'encryption'), {
-                    masterKey: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2',
+                    masterKey: masterKey,
                     createdAt: serverTimestamp()
                 });
-                log('✅ config/encryption created — masterKey set', 'success');
+                log('✅ config/encryption created — fresh random masterKey set', 'success');
 
                 // 4. Create user profile document
                 log('⏳ Creating user profile document...');
                 await setDoc(doc(db, 'users', cred.user.uid), {
-                    email: 'hussain@gmail.com',
+                    email: email,
                     displayName: 'Admin',
                     createdAt: serverTimestamp(),
                     isBanned: false,
@@ -90,7 +106,7 @@
                 });
                 log('✅ users/' + cred.user.uid + ' created', 'success');
 
-                log('🎉 SETUP COMPLETE! You can now use the website and admin panel.', 'success');
+                log('🎉 SETUP COMPLETE! Delete this file from your deployed site now.', 'success');
 
             } catch (err) {
                 log('❌ Error: ' + err.message, 'error');
