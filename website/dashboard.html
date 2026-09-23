@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Dashboard - FlowAccess</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+  <div class="bg-animation">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <div class="container">
+    <header>
+      <a href="index.html" class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Flow<span>Access</span>
+      </a>
+      <div class="nav-links" style="align-items: center;">
+        <span id="userEmail" style="color: var(--text-muted); font-size: 0.875rem;"></span>
+        <button id="logoutBtn" class="btn" style="background: transparent; border: 1px solid var(--glass-border); color: white; padding: 0.5rem 1rem;">Logout</button>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <div class="sidebar">
+        <div class="glass-card dash-card">
+          <h2>Welcome</h2>
+          <p>Hello, <strong id="userName">User</strong>!</p>
+          <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.5rem;">Manage your FlowAccess sessions here.</p>
+        </div>
+
+        <div class="glass-card dash-card">
+          <h2>Extension Status</h2>
+          <div id="extensionStatus">
+            <!-- Dynamic Content -->
+            <p style="color: var(--text-muted);">Checking...</p>
+          </div>
+        </div>
+
+        <div class="glass-card dash-card">
+          <h2>Controls</h2>
+          <button id="startFlowBtn" class="btn btn-primary" style="width: 100%; padding: 1rem;" disabled>
+            ▶ Access Flow
+          </button>
+          <button id="pauseFlowBtn" class="btn" style="width: 100%; padding: 1rem; margin-top: 0.5rem; background: #f59e0b; color: #000; display: none; font-weight: 700;">
+            ⏸ Pause
+          </button>
+          <button id="resumeFlowBtn" class="btn" style="width: 100%; padding: 1rem; margin-top: 0.5rem; background: #10b981; color: #fff; display: none; font-weight: 700;">
+            ▶ Resume
+          </button>
+        </div>
+      </div>
+
+      <div class="main-content">
+        <div class="glass-card dash-card">
+          <h2>Session Timer (3hr / 24hr)</h2>
+          <div class="timer-container">
+            <div class="circular-progress">
+              <svg>
+                <circle class="progress-bg" cx="75" cy="75" r="45"></circle>
+                <circle id="progressCircle" class="progress-value" cx="75" cy="75" r="45"></circle>
+              </svg>
+              <div id="timeRemaining" class="time-text">03:00:00</div>
+            </div>
+            <p style="color: var(--text-muted);">Remaining time for today</p>
+          </div>
+        </div>
+
+        <div class="glass-card dash-card">
+          <h2>Usage History (Last 24h)</h2>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Started At</th>
+                  <th>Duration</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="historyTableBody">
+                <tr><td colspan="3" class="text-center">Loading...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script type="module" src="./js/dashboard.js"></script>
+</body>
+</html>

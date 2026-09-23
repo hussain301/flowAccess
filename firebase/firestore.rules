@@ -1,0 +1,44 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper: Check if user is authenticated
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Helper: Check if user is admin
+    function isAdmin() {
+      return isAuth() && 
+             request.auth.token.email in 
+             get(/databases/$(database)/documents/config/admin).data.adminEmails;
+    }
+
+    // Users collection — users can read own data, admin can read/write all
+    match /users/{userId} {
+      allow read: if isAuth() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuth() && request.auth.uid == userId;
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Sessions — users can read own, admin can read all
+    match /sessions/{sessionId} {
+      allow read: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Endpoints — admin only
+    match /endpoints/{endpointId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Config — admin only
+    match /config/{docId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+  }
+}

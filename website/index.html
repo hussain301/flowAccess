@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FlowAccess - Free Google Flow Access</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+  <div class="bg-animation">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <div id="infoModal" class="modal-overlay">
+    <div class="glass-card modal-content">
+      <h3>Security Notice</h3>
+      <p>For your security, please create a new Chrome profile and only use Flow and our website in that profile. This ensures your primary data remains isolated.</p>
+      <button id="closeModalBtn" class="btn btn-primary">I Understand</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <header>
+      <a href="#" class="logo">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Flow<span>Access</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#">Home</a>
+        <a href="#features">Features</a>
+        <a href="#auth">Login</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>Free Google Flow Access</h1>
+        <p>Unlock premium capabilities with our secure platform. Start your session today.</p>
+        <a href="#auth" class="btn btn-primary">Get Started</a>
+      </section>
+
+      <section id="features" class="features">
+        <div class="glass-card feature-card">
+          <h3>Free Access</h3>
+          <p>Gain access to powerful features completely free. No hidden fees or subscriptions required.</p>
+        </div>
+        <div class="glass-card feature-card">
+          <h3>Session Timer</h3>
+          <p>Enjoy up to 3 hours of usage per 24-hour period. Our smart timer keeps track automatically.</p>
+        </div>
+        <div class="glass-card feature-card">
+          <h3>Secure & Private</h3>
+          <p>We prioritize your privacy. Isolated browser profiles ensure your main data stays untouched.</p>
+        </div>
+      </section>
+
+      <section id="auth" class="auth-section glass-card">
+        <div class="auth-tabs">
+          <div id="loginTab" class="auth-tab active">Login</div>
+          <div id="registerTab" class="auth-tab">Register</div>
+        </div>
+
+        <form id="loginForm" class="auth-form active">
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" name="email" required placeholder="you@example.com">
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" name="password" required placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Login</button>
+        </form>
+
+        <form id="registerForm" class="auth-form">
+          <div class="form-group">
+            <label>Name</label>
+            <input type="text" name="name" required placeholder="John Doe">
+          </div>
+          <div class="form-group">
+            <label>Email</label>
+            <input type="email" name="email" required placeholder="you@example.com">
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" name="password" required placeholder="••••••••">
+          </div>
+          <div class="form-group">
+            <label>Confirm Password</label>
+            <input type="password" name="confirmPassword" required placeholder="••••••••">
+          </div>
+          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Create Account</button>
+        </form>
+      </section>
+    </main>
+
+    <footer>
+      <p>&copy; 2026 FlowAccess. All rights reserved.</p>
+    </footer>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>

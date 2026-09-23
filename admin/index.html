@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>FlowAccess Admin Console</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0a0a0f; --panel: rgba(255,255,255,0.03); --border: rgba(255,255,255,0.08);
+      --text: #f8fafc; --muted: #94a3b8; --accent: #6366f1; --danger: #ef4444; --success: #10b981;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; }
+    .hidden { display: none !important; }
+
+    /* Loader */
+    .loader-overlay { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Login */
+    .login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .login-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 2rem; width: 380px; backdrop-filter: blur(20px); }
+    .login-card h2 { text-align: center; margin-bottom: 0.25rem; }
+    .login-card > p { text-align: center; color: var(--muted); margin-bottom: 1.5rem; font-size: 0.875rem; }
+    .error-text { color: var(--danger); font-size: 0.8rem; text-align: center; margin: 0.5rem 0; }
+
+    /* Forms */
+    .form-group { margin-bottom: 1rem; }
+    .form-group label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; }
+    .form-group input, .form-group select { width: 100%; padding: 0.6rem 0.8rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.9rem; outline: none; }
+    .form-group input:focus { border-color: var(--accent); }
+    .form-group small { display: block; color: var(--muted); margin-top: 4px; font-size: 0.75rem; }
+
+    /* Buttons */
+    .btn { padding: 0.5rem 1rem; border: none; border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.2s; }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: #4f46e5; }
+    .btn-secondary { background: rgba(255,255,255,0.06); color: var(--text); border: 1px solid var(--border); }
+    .btn-danger { background: rgba(239,68,68,0.15); color: var(--danger); }
+    .btn-sm { padding: 0.3rem 0.6rem; font-size: 0.75rem; }
+    .w-full { width: 100%; }
+
+    /* Layout */
+    .main-app { display: flex; min-height: 100vh; }
+    .sidebar { width: 200px; background: var(--panel); border-right: 1px solid var(--border); padding: 1.5rem 1rem; display: flex; flex-direction: column; position: fixed; height: 100vh; }
+    .sidebar h2 { font-size: 1.1rem; margin-bottom: 1.5rem; }
+    .sidebar h2 span { font-size: 0.65rem; background: var(--accent); padding: 2px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
+    .sidebar-nav { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+    .nav-item { background: none; border: none; color: var(--muted); padding: 0.6rem 0.8rem; border-radius: 8px; text-align: left; cursor: pointer; font-size: 0.85rem; transition: all 0.15s; }
+    .nav-item:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .nav-item.active { background: rgba(99,102,241,0.15); color: var(--accent); }
+    .sidebar-footer { border-top: 1px solid var(--border); padding-top: 1rem; }
+    .sidebar-footer .email { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.5rem; overflow: hidden; text-overflow: ellipsis; }
+    .content { margin-left: 200px; flex: 1; padding: 2rem; }
+
+    /* View header */
+    .view-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.5rem; }
+    .view-header h1 { font-size: 1.5rem; }
+    .header-actions { display: flex; gap: 0.5rem; align-items: center; }
+    .search-input { padding: 0.5rem 0.8rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.85rem; outline: none; }
+
+    /* Stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+    .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; }
+    .stat-card h3 { font-size: 0.8rem; color: var(--muted); font-weight: 500; }
+    .stat-value { font-size: 2rem; font-weight: 700; margin-top: 0.25rem; }
+
+    /* Tables */
+    .table-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; padding: 0.75rem 1rem; font-size: 0.75rem; color: var(--muted); text-transform: uppercase; border-bottom: 1px solid var(--border); }
+    td { padding: 0.75rem 1rem; font-size: 0.85rem; border-bottom: 1px solid rgba(255,255,255,0.03); }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .actions-cell { display: flex; gap: 4px; }
+
+    /* Badges */
+    .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 12px; font-weight: 600; }
+    .badge-active { background: rgba(16,185,129,0.15); color: var(--success); }
+    .badge-banned { background: rgba(239,68,68,0.15); color: var(--danger); }
+    .badge-inactive { background: rgba(245,158,11,0.15); color: #f59e0b; }
+
+    /* Modal */
+    .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 999; }
+    .modal-content { background: #12121a; border: 1px solid var(--border); border-radius: 16px; padding: 1.5rem; width: 420px; max-width: 90vw; }
+    .modal-content h3 { margin-bottom: 1rem; }
+    .modal-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1rem; }
+
+    /* Toast */
+    .toast-container { position: fixed; top: 1rem; right: 1rem; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+    .toast { padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.85rem; background: #1e1e2e; border: 1px solid var(--border); animation: slideIn 0.3s ease; }
+    .toast.success { border-color: rgba(16,185,129,0.4); }
+    .toast.error { border-color: rgba(239,68,68,0.4); }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  </style>
+</head>
+<body>
+
+  <div id="loader" class="loader-overlay"><div class="spinner"></div></div>
+  <div id="toasts" class="toast-container"></div>
+
+  <!-- LOGIN -->
+  <div id="loginScreen" class="login-screen hidden">
+    <div class="login-card">
+      <h2>Admin Login</h2>
+      <p>FlowAccess Admin Console</p>
+      <form id="loginForm">
+        <div class="form-group"><label>Email</label><input type="email" id="loginEmail" required placeholder="admin@example.com"></div>
+        <div class="form-group"><label>Password</label><input type="password" id="loginPass" required placeholder="••••••••"></div>
+        <div id="loginError" class="error-text hidden"></div>
+        <button type="submit" class="btn btn-primary w-full" style="margin-top:0.5rem;">Login</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="mainApp" class="main-app hidden">
+    <aside class="sidebar">
+      <h2>⚡ FlowAccess <span>Admin</span></h2>
+      <nav class="sidebar-nav">
+        <button class="nav-item active" onclick="showView('dashboard')">📊 Dashboard</button>
+        <button class="nav-item" onclick="showView('users')">👥 Users</button>
+        <button class="nav-item" onclick="showView('endpoints')">🔗 Endpoints</button>
+        <button class="nav-item" onclick="showView('sessions')">⏱️ Sessions</button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="email" id="adminEmail">admin</div>
+        <button class="btn btn-secondary w-full btn-sm" onclick="doLogout()">Logout 🚪</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- DASHBOARD -->
+      <div id="view-dashboard">
+        <div class="view-header"><h1>Dashboard</h1></div>
+        <div class="stats-grid">
+          <div class="stat-card"><h3>Total Users</h3><div class="stat-value" id="statUsers">0</div></div>
+          <div class="stat-card"><h3>Active Sessions</h3><div class="stat-value" id="statActive">0</div></div>
+          <div class="stat-card"><h3>Sessions Today</h3><div class="stat-value" id="statToday">0</div></div>
+          <div class="stat-card"><h3>Total Sessions</h3><div class="stat-value" id="statTotal">0</div></div>
+        </div>
+        <div class="table-card" style="padding:1rem;">
+          <h3 style="margin-bottom:0.75rem;">Recent Activity</h3>
+          <table><thead><tr><th>Time</th><th>User</th><th>Action</th></tr></thead><tbody id="recentBody"></tbody></table>
+        </div>
+      </div>
+
+      <!-- USERS -->
+      <div id="view-users" class="hidden">
+        <div class="view-header">
+          <h1>Users</h1>
+          <div class="header-actions">
+            <button class="btn btn-primary" onclick="openCreateUser()">➕ Create User</button>
+            <button class="btn btn-secondary" onclick="loadUsers()">🔄 Refresh</button>
+          </div>
+        </div>
+        <div class="table-card">
+          <table><thead><tr><th>Email</th><th>Name</th><th>Time Limit</th><th>Usage</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="usersBody"><tr><td colspan="6" style="color:var(--muted);text-align:center;">Loading...</td></tr></tbody></table>
+        </div>
+      </div>
+
+      <!-- ENDPOINTS -->
+      <div id="view-endpoints" class="hidden">
+        <div class="view-header">
+          <h1>Endpoints</h1>
+          <button class="btn btn-primary" onclick="openAddEndpoint()">➕ Add Endpoint</button>
+        </div>
+        <div class="table-card">
+          <table><thead><tr><th>Name</th><th>URL (encrypted)</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="endpointsBody"><tr><td colspan="4" style="color:var(--muted);text-align:center;">Loading...</td></tr></tbody></table>
+        </div>
+      </div>
+
+      <!-- SESSIONS -->
+      <div id="view-sessions" class="hidden">
+        <div class="view-header">
+          <h1>Sessions</h1>
+          <button class="btn btn-secondary" onclick="loadSessions()">🔄 Refresh</button>
+        </div>
+        <div class="table-card">
+          <table><thead><tr><th>User</th><th>Start</th><th>End</th><th>Duration</th><th>Status</th></tr></thead>
+          <tbody id="sessionsBody"><tr><td colspan="5" style="color:var(--muted);text-align:center;">Loading...</td></tr></tbody></table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- CREATE USER MODAL -->
+  <div id="createUserModal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Create New User</h3>
+      <form onsubmit="createUser(event)">
+        <div class="form-group"><label>Display Name</label><input type="text" id="newName" required placeholder="John Doe"></div>
+        <div class="form-group"><label>Email</label><input type="email" id="newEmail" required placeholder="user@example.com"></div>
+        <div class="form-group"><label>Password</label><input type="text" id="newPass" required placeholder="password123" minlength="6"></div>
+        <div class="form-group">
+          <label>Time Limit (minutes per 24hr)</label>
+          <input type="number" id="newTimeLimit" value="180" min="1" max="1440">
+          <small>Default: 180 min (3hr). For testing use 2 min</small>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('createUserModal').classList.add('hidden')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- EDIT TIME MODAL -->
+  <div id="editTimeModal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Edit Time Limit</h3>
+      <form onsubmit="saveTimeLimit(event)">
+        <input type="hidden" id="editTimeUid">
+        <div class="form-group">
+          <label>Time Limit (minutes per 24hr)</label>
+          <input type="number" id="editTimeVal" value="180" min="1" max="1440">
+          <small>For testing, set to 1-2 minutes</small>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('editTimeModal').classList.add('hidden')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ENDPOINT MODAL -->
+  <div id="endpointModal" class="modal hidden">
+    <div class="modal-content">
+      <h3 id="epModalTitle">Add Endpoint</h3>
+      <form onsubmit="saveEndpoint(event)">
+        <input type="hidden" id="epId">
+        <div class="form-group"><label>Name</label><input type="text" id="epName" required placeholder="My API"></div>
+        <div class="form-group"><label>URL (will be encrypted)</label><input type="url" id="epUrl" required placeholder="https://api.example.com/..."></div>
+        <div class="form-group"><label><input type="checkbox" id="epActive" checked> Active</label></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('endpointModal').classList.add('hidden')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Endpoint</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- CONFIRM MODAL -->
+  <div id="confirmModal" class="modal hidden">
+    <div class="modal-content">
+      <h3 id="confirmTitle">Confirm</h3>
+      <p id="confirmMsg" style="color:var(--muted);margin:0.5rem 0;"></p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="document.getElementById('confirmModal').classList.add('hidden')">Cancel</button>
+        <button class="btn btn-danger" id="confirmOk">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
+import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
+import { getFirestore, collection, getDocs, getDoc, doc, updateDoc, deleteDoc, setDoc, addDoc, query, orderBy, limit, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
+
+const app = initializeApp({
+  apiKey: "AIzaSyBDuvhx4Uj4K0lmDZbUO8iRNb3FNK-qI7w",
+  authDomain: "flow-access-1f022.firebaseapp.com",
+  projectId: "flow-access-1f022",
+  storageBucket: "flow-access-1f022.firebasestorage.app",
+  messagingSenderId: "1047778033297",
+  appId: "1:1047778033297:web:6d58852e9116c3979fc930"
+});
+const auth = getAuth(app);
+const db = getFirestore(app);
+const API_KEY = 'AIzaSyBDuvhx4Uj4K0lmDZbUO8iRNb3FNK-qI7w';
+const ADMIN_EMAILS = ['hussain@gmail.com'];
+let masterKey = null;
+
+// --- Toast ---
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3000);
+}
+window.toast = toast;
+
+// --- Navigation ---
+window.showView = function(name) {
+  document.querySelectorAll('[id^="view-"]').forEach(v => v.classList.add('hidden'));
+  document.getElementById('view-' + name).classList.remove('hidden');
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+};
+
+// --- Auth ---
+const $ = id => document.getElementById(id);
+
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('loginError').classList.add('hidden');
+  try {
+    await signInWithEmailAndPassword(auth, $('loginEmail').value.trim(), $('loginPass').value);
+  } catch (err) {
+    $('loginError').textContent = err.code === 'auth/invalid-credential' ? 'Invalid email or password.' : err.message;
+    $('loginError').classList.remove('hidden');
+  }
+});
+
+window.doLogout = async () => { await signOut(auth); };
+
+onAuthStateChanged(auth, async (user) => {
+  if (user) {
+    const email = user.email.toLowerCase().trim();
+    if (ADMIN_EMAILS.includes(email)) {
+      $('loginScreen').classList.add('hidden');
+      $('mainApp').classList.remove('hidden');
+      $('adminEmail').textContent = user.email;
+      $('loader').classList.add('hidden');
+      try {
+        const encDoc = await getDoc(doc(db, 'config', 'encryption'));
+        masterKey = encDoc.exists() ? encDoc.data().masterKey : null;
+      } catch(e) { console.warn('No encryption key yet'); }
+      loadDashboard();
+      loadUsers();
+      loadEndpoints();
+      loadSessions();
+    } else {
+      await signOut(auth);
+      $('loginError').textContent = 'Access Denied: Not an administrator.';
+      $('loginError').classList.remove('hidden');
+      $('loginScreen').classList.remove('hidden');
+      $('mainApp').classList.add('hidden');
+      $('loader').classList.add('hidden');
+    }
+  } else {
+    $('loginScreen').classList.remove('hidden');
+    $('mainApp').classList.add('hidden');
+    $('loader').classList.add('hidden');
+  }
+});
+
+// --- Dashboard ---
+async function loadDashboard() {
+  try {
+    const usersSnap = await getDocs(collection(db, 'users'));
+    $('statUsers').textContent = usersSnap.size;
+    const sessionsSnap = await getDocs(collection(db, 'sessions'));
+    $('statTotal').textContent = sessionsSnap.size;
+    let active = 0, today = 0;
+    const dayStart = new Date(); dayStart.setHours(0,0,0,0);
+    sessionsSnap.forEach(d => {
+      const s = d.data();
+      if (s.status === 'Active') active++;
+      const t = s.startTime?.toMillis ? s.startTime.toMillis() : 0;
+      if (t > dayStart.getTime()) today++;
+    });
+    $('statActive').textContent = active;
+    $('statToday').textContent = today;
+
+    const rq = query(collection(db, 'sessions'), orderBy('startTime', 'desc'), limit(10));
+    const rSnap = await getDocs(rq);
+    $('recentBody').innerHTML = '';
+    if (rSnap.empty) { $('recentBody').innerHTML = '<tr><td colspan="3" style="color:var(--muted);text-align:center;">No activity yet</td></tr>'; return; }
+    rSnap.forEach(d => {
+      const s = d.data();
+      const time = s.startTime?.toDate ? s.startTime.toDate().toLocaleString() : '-';
+      $('recentBody').innerHTML += `<tr><td>${time}</td><td>${s.userEmail||'?'}</td><td>Session ${s.status||'?'}</td></tr>`;
+    });
+  } catch(e) { console.error('Dashboard error:', e); }
+}
+
+// --- Users ---
+async function loadUsers() {
+  try {
+    const snap = await getDocs(collection(db, 'users'));
+    const tbody = $('usersBody');
+    tbody.innerHTML = '';
+    if (snap.empty) { tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);text-align:center;">No users yet. Create one!</td></tr>'; return; }
+    
+    // Get sessions to show usage
+    const sessionsSnap = await getDocs(collection(db, 'sessions'));
+    const now = new Date();
+    const dayAgo = new Date(now.getTime() - 24*60*60*1000);
+    
+    // Calculate per-user usage in last 24h
+    const userUsage = {};
+    sessionsSnap.forEach(d => {
+      const s = d.data();
+      if (!s.userId) return;
+      const startMs = s.startTime?.toMillis ? s.startTime.toMillis() : (s.startedAt?.toMillis ? s.startedAt.toMillis() : 0);
+      if (startMs > dayAgo.getTime() && s.status !== 'AdminReset') {
+        if (!userUsage[s.userId]) userUsage[s.userId] = 0;
+        userUsage[s.userId] += (s.durationMs || 0);
+      }
+    });
+    
+    snap.forEach(d => {
+      const u = d.data();
+      const tl = u.timeLimitMinutes || 180;
+      const banned = u.isBanned === true;
+      const usedMs = userUsage[d.id] || 0;
+      const usedMin = Math.round(usedMs / 60000);
+      const remainMin = Math.max(0, tl - usedMin);
+      const isExpired = remainMin <= 0 && usedMin > 0;
+      
+      tbody.innerHTML += `<tr>
+        <td>${u.email||'-'}</td><td>${u.displayName||'-'}</td>
+        <td><span class="badge badge-active" style="cursor:pointer" onclick="openEditTime('${d.id}',${tl})">${tl} min ✏️</span></td>
+        <td>${usedMin} / ${tl} min <span style="color:${isExpired?'#ef4444':'#10b981'};font-size:0.7rem;">(${remainMin} left)</span></td>
+        <td><span class="badge ${banned?'badge-banned':isExpired?'badge-inactive':'badge-active'}">${banned?'Banned':isExpired?'Expired':'Active'}</span></td>
+        <td class="actions-cell">
+          <button class="btn btn-sm btn-secondary" onclick="openEditTime('${d.id}',${tl})">⏱️</button>
+          <button class="btn btn-sm btn-primary" onclick="resetUserSession('${d.id}','${u.email||''}',${tl})" title="Reset session - give fresh time">🔄 Reset</button>
+          <button class="btn btn-sm ${banned?'btn-primary':'btn-danger'}" onclick="toggleBan('${d.id}',${banned})">${banned?'Unban':'Ban'}</button>
+        </td></tr>`;
+    });
+  } catch(e) { console.error('Users error:', e); toast('Users load error: '+e.message, 'error'); }
+}
+window.loadUsers = loadUsers;
+
+window.openCreateUser = () => $('createUserModal').classList.remove('hidden');
+
+window.createUser = async (e) => {
+  e.preventDefault();
+  const name = $('newName').value.trim(), email = $('newEmail').value.trim();
+  const pass = $('newPass').value, tl = parseInt($('newTimeLimit').value) || 180;
+  try {
+    toast('Creating user...', 'info');
+    const resp = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({email, password: pass, returnSecureToken: true})
+    });
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error.message);
+    await setDoc(doc(db, 'users', data.localId), {
+      email, displayName: name, createdAt: serverTimestamp(),
+      isBanned: false, totalUsageMinutes: 0, timeLimitMinutes: tl, role: 'user'
+    });
+    toast(`✅ User created: ${email}`, 'success');
+    $('createUserModal').classList.add('hidden');
+    loadUsers(); loadDashboard();
+  } catch(err) {
+    let msg = err.message;
+    if (msg.includes('EMAIL_EXISTS')) msg = 'Email already registered!';
+    if (msg.includes('WEAK_PASSWORD')) msg = 'Password must be 6+ characters!';
+    toast('❌ ' + msg, 'error');
+  }
+};
+
+window.toggleBan = async (uid, current) => {
+  try {
+    await updateDoc(doc(db, 'users', uid), { isBanned: !current });
+    toast(current ? '✅ User unbanned' : '✅ User banned', 'success');
+    loadUsers();
+  } catch(e) { toast('Error: '+e.message, 'error'); }
+};
+
+// Reset user session — marks all their last 24h sessions as 'AdminReset' so they get fresh time
+window.resetUserSession = async (uid, email, timeLimit) => {
+  if (!confirm(`Reset session for ${email}?\n\nThis will give them a fresh ${timeLimit} minutes of time.`)) return;
+  
+  try {
+    toast('Resetting sessions...', 'info');
+    
+    const now = new Date();
+    const dayAgo = new Date(now.getTime() - 24*60*60*1000);
+    
+    // Find all sessions for this user in last 24h
+    const q = query(collection(db, 'sessions'), where('userId', '==', uid));
+    const snap = await getDocs(q);
+    
+    let resetCount = 0;
+    for (const d of snap.docs) {
+      const s = d.data();
+      const startMs = s.startTime?.toMillis ? s.startTime.toMillis() : (s.startedAt?.toMillis ? s.startedAt.toMillis() : 0);
+      
+      // Only reset sessions from last 24h that aren't already reset
+      if (startMs > dayAgo.getTime() && s.status !== 'AdminReset') {
+        await updateDoc(doc(db, 'sessions', d.id), {
+          status: 'AdminReset',
+          resetBy: 'admin',
+          resetAt: serverTimestamp(),
+          endedAt: serverTimestamp(),
+          endTime: serverTimestamp()
+        });
+        resetCount++;
+      }
+    }
+    
+    toast(`✅ Reset ${resetCount} session(s) for ${email}. User now has fresh ${timeLimit} min.`, 'success');
+    loadUsers();
+    loadDashboard();
+  } catch(e) {
+    console.error('Reset error:', e);
+    toast('❌ Error resetting: ' + e.message, 'error');
+  }
+};
+
+window.openEditTime = (uid, val) => { $('editTimeUid').value = uid; $('editTimeVal').value = val; $('editTimeModal').classList.remove('hidden'); };
+window.saveTimeLimit = async (e) => {
+  e.preventDefault();
+  try {
+    await updateDoc(doc(db, 'users', $('editTimeUid').value), { timeLimitMinutes: parseInt($('editTimeVal').value) });
+    toast('✅ Time limit updated', 'success');
+    $('editTimeModal').classList.add('hidden'); loadUsers();
+  } catch(e) { toast('Error: '+e.message, 'error'); }
+};
+
+// --- Endpoints ---
+async function loadEndpoints() {
+  try {
+    const snap = await getDocs(collection(db, 'endpoints'));
+    const tbody = $('endpointsBody');
+    tbody.innerHTML = '';
+    if (snap.empty) { tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);text-align:center;">No endpoints yet. Add one!</td></tr>'; return; }
+    snap.forEach(d => {
+      const ep = d.data();
+      const trunc = ep.encryptedUrl ? ep.encryptedUrl.substring(0,25)+'...' : '-';
+      tbody.innerHTML += `<tr>
+        <td>${ep.name||'-'}</td><td style="font-family:monospace;font-size:0.75rem;">${trunc}</td>
+        <td><span class="badge ${ep.isActive?'badge-active':'badge-inactive'}">${ep.isActive?'Active':'Inactive'}</span></td>
+        <td class="actions-cell">
+          <button class="btn btn-sm btn-secondary" onclick="toggleEp('${d.id}',${ep.isActive})">Toggle</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteEp('${d.id}')">Delete</button>
+        </td></tr>`;
+    });
+  } catch(e) { console.error('Endpoints error:', e); }
+}
+window.loadEndpoints = loadEndpoints;
+
+window.openAddEndpoint = () => { $('epId').value=''; $('epName').value=''; $('epUrl').value=''; $('epActive').checked=true; $('epModalTitle').textContent='Add Endpoint'; $('endpointModal').classList.remove('hidden'); };
+
+window.saveEndpoint = async (e) => {
+  e.preventDefault();
+  const name = $('epName').value, url = $('epUrl').value, active = $('epActive').checked;
+  try {
+    // Simple base64 encoding if no master key
+    const encoded = masterKey ? btoa(url) : btoa(url);
+    const data = { name, encryptedUrl: encoded, isActive: active, updatedAt: serverTimestamp() };
+    const id = $('epId').value;
+    if (id) { await updateDoc(doc(db, 'endpoints', id), data); }
+    else { data.createdAt = serverTimestamp(); await addDoc(collection(db, 'endpoints'), data); }
+    toast('✅ Endpoint saved', 'success');
+    $('endpointModal').classList.add('hidden'); loadEndpoints();
+  } catch(err) { toast('Error: '+err.message, 'error'); }
+};
+
+window.toggleEp = async (id, cur) => {
+  await updateDoc(doc(db, 'endpoints', id), { isActive: !cur, updatedAt: serverTimestamp() });
+  toast('✅ Toggled', 'success'); loadEndpoints();
+};
+window.deleteEp = async (id) => {
+  if (!confirm('Delete this endpoint?')) return;
+  await deleteDoc(doc(db, 'endpoints', id));
+  toast('✅ Deleted', 'success'); loadEndpoints();
+};
+
+// --- Sessions ---
+async function loadSessions() {
+  try {
+    const q2 = query(collection(db, 'sessions'), orderBy('startTime', 'desc'), limit(50));
+    const snap = await getDocs(q2);
+    const tbody = $('sessionsBody');
+    tbody.innerHTML = '';
+    if (snap.empty) { tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center;">No sessions yet</td></tr>'; return; }
+    snap.forEach(d => {
+      const s = d.data();
+      const start = s.startTime?.toDate ? s.startTime.toDate().toLocaleString() : '-';
+      const end = s.endTime?.toDate ? s.endTime.toDate().toLocaleString() : '-';
+      let dur = '-';
+      if (s.durationMs) { const m = Math.floor(s.durationMs/60000); dur = m + ' min'; }
+      const badge = s.status==='Active' ? 'badge-active' : s.status==='Expired' ? 'badge-banned' : 'badge-inactive';
+      tbody.innerHTML += `<tr><td>${s.userEmail||'?'}</td><td>${start}</td><td>${end}</td><td>${dur}</td><td><span class="badge ${badge}">${s.status||'?'}</span></td></tr>`;
+    });
+  } catch(e) { console.error('Sessions error:', e); }
+}
+window.loadSessions = loadSessions;
+</script>
+</body>
+</html>

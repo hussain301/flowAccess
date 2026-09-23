@@ -1,0 +1,495 @@
+import { auth, db } from './firebase-config.js';
+import { logoutUser, onAuthChange } from './auth.js';
+import { 
+  collection, query, where, getDocs, doc, setDoc, addDoc, updateDoc, 
+  serverTimestamp, orderBy, getDoc 
+} from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
+
+// === STATE ===
+const DEFAULT_TIME_MS = 3 * 60 * 60 * 1000;
+let maxTimeMs = DEFAULT_TIME_MS;
+let currentUser = null;
+let currentSessionId = null;
+let remainingTimeMs = DEFAULT_TIME_MS;
+let timerInterval = null;
+let isExtensionReady = false;
+let isPaused = false;
+let activeEndpointUrl = null;
+
+// === DOM ELEMENTS ===
+const userEmailEl = document.getElementById('userEmail');
+const userNameEl = document.getElementById('userName');
+const logoutBtn = document.getElementById('logoutBtn');
+const extensionStatusEl = document.getElementById('extensionStatus');
+const startFlowBtn = document.getElementById('startFlowBtn');
+const pauseFlowBtn = document.getElementById('pauseFlowBtn');
+const resumeFlowBtn = document.getElementById('resumeFlowBtn');
+const timeRemainingEl = document.getElementById('timeRemaining');
+const progressCircle = document.getElementById('progressCircle');
+const historyTableBody = document.getElementById('historyTableBody');
+const toastContainer = document.getElementById('toastContainer');
+
+// === AUTH STATE ===
+onAuthChange(async (user) => {
+  if (!user) {
+    window.location.href = 'index.html';
+    return;
+  }
+  currentUser = user;
+  userEmailEl.innerText = user.email;
+  
+  try {
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    if (userDoc.exists()) {
+      const userData = userDoc.data();
+      userNameEl.innerText = userData.displayName || user.email;
+      
+      // Ban check
+      if (userData.isBanned) {
+        showToast("Your account has been suspended.", "error");
+        await logoutUser();
+        return;
+      }
+      
+      // Per-user time limit from admin
+      const timeLimitMin = userData.timeLimitMinutes || 180;
+      maxTimeMs = timeLimitMin * 60 * 1000;
+      remainingTimeMs = maxTimeMs;
+      updateTimerUI();
+      
+      // Show limit info
+      const timerLabel = document.querySelector('.timer-container p');
+      if (timerLabel) timerLabel.textContent = `Remaining time (${timeLimitMin} min limit per 24hr)`;
+    }
+  } catch(e) {
+    console.error("Error loading user profile:", e);
+  }
+  
+  // Load active endpoint from Firestore
+  await loadActiveEndpoint();
+  
+  // Check extension
+  checkExtension();
+  
+  // Load usage data & adjust timer
+  await loadUsageData();
+});
+
+// === LOGOUT ===
+logoutBtn.addEventListener('click', async () => {
+  if (currentSessionId && !isPaused) {
+    await pauseSession();
+  }
+  await logoutUser();
+});
+
+// === TOAST ===
+function showToast(message, type = 'error') {
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.innerText = message;
+  toastContainer.appendChild(toast);
+  setTimeout(() => toast.classList.add('show'), 10);
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// === EXTENSION DETECTION ===
+function checkExtension() {
+  if (document.documentElement.dataset.flowAccessExtension === 'true') {
+    setExtensionReady();
+  } else {
+    extensionStatusEl.innerHTML = `
+      <div class="status-badge red">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+        Extension Not Detected
+      </div>
+      <p class="ext-instruction">Please install and enable the FlowAccess extension.</p>
+    `;
+  }
+  document.addEventListener('FLOW_ACCESS_EXTENSION_READY', setExtensionReady);
+}
+
+function setExtensionReady() {
+  isExtensionReady = true;
+  extensionStatusEl.innerHTML = `
+    <div class="status-badge green">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+      Extension Ready
+    </div>
+  `;
+  updateButtonStates();
+}
+
+// === LOAD ACTIVE ENDPOINT ===
+async function loadActiveEndpoint() {
+  try {
+    const snap = await getDocs(collection(db, 'endpoints'));
+    snap.forEach(d => {
+      const ep = d.data();
+      if (ep.isActive && !activeEndpointUrl) {
+        try { activeEndpointUrl = atob(ep.encryptedUrl); } 
+        catch(e) { activeEndpointUrl = ep.encryptedUrl; }
+      }
+    });
+    console.log('[Dashboard] Endpoint loaded:', activeEndpointUrl ? 'YES' : 'NONE');
+  } catch(e) {
+    console.error("Error loading endpoints:", e);
+  }
+}
+
+// === LOAD USAGE DATA ===
+async function loadUsageData() {
+  try {
+    const now = new Date();
+    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    
+    const q = query(collection(db, 'sessions'), where('userId', '==', currentUser.uid));
+    const snapshot = await getDocs(q);
+    let totalUsedMs = 0;
+    
+    historyTableBody.innerHTML = '';
+    
+    // Filter last 24h client-side, skip AdminReset sessions
+    const sessions = [];
+    snapshot.forEach(d => {
+      const data = d.data();
+      if (data.status === 'AdminReset') return; // Skip admin-reset sessions
+      const startMs = data.startedAt?.toMillis ? data.startedAt.toMillis() : 0;
+      if (startMs > twentyFourHoursAgo.getTime()) {
+        sessions.push({ id: d.id, data, startMs });
+      }
+    });
+    sessions.sort((a, b) => b.startMs - a.startMs);
+    
+    sessions.forEach(({ id, data }) => {
+      let durationMs = data.durationMs || 0;
+      
+      // Active session — resume timer
+      if (data.status === 'Active' && data.startedAt) {
+        const started = data.startedAt.toDate();
+        durationMs = now.getTime() - started.getTime();
+        currentSessionId = id;
+        isPaused = false;
+        startTimer();
+      }
+      
+      // Paused session — show paused state
+      if (data.status === 'Paused') {
+        currentSessionId = id;
+        isPaused = true;
+      }
+      
+      totalUsedMs += durationMs;
+      
+      const tr = document.createElement('tr');
+      const dateStr = data.startedAt ? data.startedAt.toDate().toLocaleString() : 'N/A';
+      const durStr = formatTime(durationMs);
+      const status = data.status || (data.endedAt ? 'Completed' : 'Active');
+      tr.innerHTML = `
+        <td>${dateStr}</td>
+        <td>${durStr}</td>
+        <td><span class="status-${status.toLowerCase()}">${status}</span></td>
+      `;
+      historyTableBody.appendChild(tr);
+    });
+    
+    remainingTimeMs = Math.max(0, maxTimeMs - totalUsedMs);
+    updateTimerUI();
+    updateButtonStates();
+    
+    if (sessions.length === 0) {
+      historyTableBody.innerHTML = '<tr><td colspan="3" class="text-center">No sessions in the last 24 hours</td></tr>';
+    }
+  } catch (error) {
+    console.error("Error loading usage:", error);
+    updateTimerUI();
+    updateButtonStates();
+  }
+}
+
+// === BUTTON STATES ===
+function updateButtonStates() {
+  startFlowBtn.style.display = '';
+  pauseFlowBtn.style.display = 'none';
+  resumeFlowBtn.style.display = 'none';
+
+  if (remainingTimeMs <= 0) {
+    // Time expired
+    startFlowBtn.disabled = true;
+    startFlowBtn.innerText = "⏰ Daily Limit Reached";
+    startFlowBtn.style.background = '#ef4444';
+  } else if (currentSessionId && !isPaused) {
+    // Active session — show pause button
+    startFlowBtn.style.display = 'none';
+    pauseFlowBtn.style.display = 'block';
+  } else if (currentSessionId && isPaused) {
+    // Paused session — show resume button
+    startFlowBtn.style.display = 'none';
+    resumeFlowBtn.style.display = 'block';
+  } else {
+    // No session — show start button
+    startFlowBtn.disabled = false;
+    startFlowBtn.innerText = "▶ Access Flow";
+    startFlowBtn.style.background = '';
+  }
+}
+
+// === TIMER ===
+function formatTime(ms) {
+  if (ms < 0) ms = 0;
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+function updateTimerUI() {
+  timeRemainingEl.innerText = formatTime(remainingTimeMs);
+  const percent = Math.max(0, Math.min(100, (remainingTimeMs / maxTimeMs) * 100));
+  const offset = 282.74 - (percent / 100) * 282.74;
+  progressCircle.style.strokeDashoffset = offset;
+  
+  if (remainingTimeMs < 60000) {
+    progressCircle.style.stroke = '#ef4444';
+    timeRemainingEl.style.color = '#ef4444';
+  } else if (remainingTimeMs < maxTimeMs * 0.2) {
+    progressCircle.style.stroke = '#eab308';
+    timeRemainingEl.style.color = '#eab308';
+  } else {
+    progressCircle.style.stroke = '';
+    timeRemainingEl.style.color = '';
+  }
+}
+
+function startTimer() {
+  if (timerInterval) clearInterval(timerInterval);
+  
+  timerInterval = setInterval(async () => {
+    if (isPaused) return;
+    
+    remainingTimeMs = Math.max(0, remainingTimeMs - 1000);
+    updateTimerUI();
+    
+    if (remainingTimeMs <= 0) {
+      clearInterval(timerInterval);
+      
+      // Time expired — end session, wipe cookies, close Flow
+      await endSession('Expired');
+      
+      // Wipe cookies (logout from Flow)
+      sendToExtension('WIPE_COOKIES', {});
+      
+      // Close Flow tab
+      sendToExtension('CLOSE_FLOW_TAB', {});
+      
+      showToast("⏰ Time limit reached! Flow session ended.", "error");
+      updateButtonStates();
+      
+      setTimeout(() => loadUsageData(), 1000);
+    }
+  }, 1000);
+}
+
+// === EXTENSION COMMUNICATION ===
+function sendToExtension(action, payload) {
+  window.postMessage({
+    source: 'FLOW_ACCESS_WEB',
+    id: action + '-' + Date.now(),
+    action: action,
+    payload: payload || {}
+  }, '*');
+}
+
+// Listen for extension replies
+window.addEventListener('message', (event) => {
+  if (event.source !== window || !event.data) return;
+  if (event.data.source !== 'FLOW_ACCESS_EXTENSION_REPLY') return;
+  
+  const { payload } = event.data;
+  if (payload && payload.success) {
+    console.log('[Dashboard] Extension response:', payload);
+  } else if (payload && payload.error) {
+    console.warn('[Dashboard] Extension error:', payload.error);
+  }
+});
+
+// ========================================
+// START SESSION
+// ========================================
+startFlowBtn.addEventListener('click', async () => {
+  try {
+    startFlowBtn.disabled = true;
+    startFlowBtn.innerText = "⏳ Connecting...";
+    
+    if (!activeEndpointUrl) {
+      showToast("❌ Service unavailable. Contact admin.", "error");
+      startFlowBtn.disabled = false;
+      startFlowBtn.innerText = "▶ Access Flow";
+      return;
+    }
+    
+    // 1. Create session in Firestore
+    const sessionRef = await addDoc(collection(db, 'sessions'), {
+      userId: currentUser.uid,
+      userEmail: currentUser.email,
+      startedAt: serverTimestamp(),
+      startTime: serverTimestamp(),
+      endedAt: null,
+      endTime: null,
+      durationMs: 0,
+      status: 'Active'
+    });
+    
+    currentSessionId = sessionRef.id;
+    isPaused = false;
+    
+    // 2. Tell extension to setup access and open Flow (all behind the scenes)
+    sendToExtension('FETCH_AND_INJECT', {
+      endpointUrl: activeEndpointUrl,
+      sessionId: currentSessionId
+    });
+    
+    // 3. Start countdown timer
+    showToast("✅ Session started! Opening Flow...", "success");
+    startTimer();
+    updateButtonStates();
+    
+  } catch (error) {
+    console.error("Error starting flow:", error);
+    showToast("❌ Failed to start. Try again.", "error");
+    startFlowBtn.disabled = false;
+    startFlowBtn.innerText = "▶ Access Flow";
+  }
+});
+
+// ========================================
+// PAUSE SESSION
+// ========================================
+pauseFlowBtn.addEventListener('click', async () => {
+  await pauseSession();
+});
+
+async function pauseSession() {
+  if (!currentSessionId) return;
+  
+  try {
+    isPaused = true;
+    if (timerInterval) clearInterval(timerInterval);
+    
+    // Update session status in Firestore
+    const sessionRef = doc(db, 'sessions', currentSessionId);
+    const sessionDoc = await getDoc(sessionRef);
+    if (sessionDoc.exists()) {
+      const data = sessionDoc.data();
+      const started = data.startedAt.toDate();
+      const now = new Date();
+      const durationMs = now.getTime() - started.getTime();
+      
+      await updateDoc(sessionRef, {
+        status: 'Paused',
+        durationMs: durationMs,
+        pausedAt: serverTimestamp()
+      });
+    }
+    
+    // Wipe cookies — logout from Flow
+    sendToExtension('WIPE_COOKIES', {});
+    
+    // Close Flow tab
+    sendToExtension('CLOSE_FLOW_TAB', {});
+    
+    showToast("⏸ Session paused.", "success");
+    updateButtonStates();
+    
+  } catch(e) {
+    console.error("Pause error:", e);
+    showToast("Error pausing session", "error");
+  }
+}
+
+// ========================================
+// RESUME SESSION
+// ========================================
+resumeFlowBtn.addEventListener('click', async () => {
+  try {
+    resumeFlowBtn.disabled = true;
+    resumeFlowBtn.innerText = "🔄 Resuming...";
+    
+    if (!activeEndpointUrl) {
+      showToast("❌ No active endpoint.", "error");
+      resumeFlowBtn.disabled = false;
+      resumeFlowBtn.innerText = "▶ Resume Session";
+      return;
+    }
+    
+    // 1. Re-inject cookies and open Flow
+    sendToExtension('FETCH_AND_INJECT', {
+      endpointUrl: activeEndpointUrl,
+      sessionId: currentSessionId
+    });
+    
+    // 2. Create new session (old one was paused with duration saved)
+    const sessionRef = await addDoc(collection(db, 'sessions'), {
+      userId: currentUser.uid,
+      userEmail: currentUser.email,
+      startedAt: serverTimestamp(),
+      startTime: serverTimestamp(),
+      endedAt: null,
+      endTime: null,
+      durationMs: 0,
+      status: 'Active',
+      resumedFrom: currentSessionId
+    });
+    
+    currentSessionId = sessionRef.id;
+    isPaused = false;
+    
+    // 3. Restart timer
+    startTimer();
+    updateButtonStates();
+    
+    showToast("▶ Session resumed! Opening Flow...", "success");
+    
+  } catch(e) {
+    console.error("Resume error:", e);
+    showToast("Error resuming", "error");
+    resumeFlowBtn.disabled = false;
+    resumeFlowBtn.innerText = "▶ Resume Session";
+  }
+});
+
+// ========================================
+// END SESSION
+// ========================================
+async function endSession(status = 'Completed') {
+  if (!currentSessionId) return;
+  
+  try {
+    const sessionRef = doc(db, 'sessions', currentSessionId);
+    const sessionDoc = await getDoc(sessionRef);
+    if (sessionDoc.exists()) {
+      const data = sessionDoc.data();
+      const started = data.startedAt.toDate();
+      const now = new Date();
+      const durationMs = now.getTime() - started.getTime();
+      
+      await updateDoc(sessionRef, {
+        endedAt: serverTimestamp(),
+        endTime: serverTimestamp(),
+        durationMs: durationMs,
+        status: status
+      });
+    }
+    
+    currentSessionId = null;
+    if (timerInterval) clearInterval(timerInterval);
+    updateButtonStates();
+    
+  } catch (error) {
+    console.error("Error ending session:", error);
+  }
+}
