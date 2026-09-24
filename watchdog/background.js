@@ -4,47 +4,52 @@
 // Chrome gives an extension NO hook for its own uninstall: once it is
 // removed, zero of its code can run, so it can never wipe its own
 // cookies afterwards. This tiny companion extension is the fix: it
-// watches the main "FlowAccess Tool" extension via the management API
-// and, the moment that extension is uninstalled OR disabled, wipes the
-// shared Google/Flow session cookies and closes every Flow tab.
+// watches the main FlowAccess extension and, the moment that extension
+// is uninstalled OR disabled, wipes the shared Google/Flow session
+// cookies and closes every Flow tab.
 //
-// Install order: install the watchdog BEFORE (or together with) the
-// main extension. The main extension exempts "FlowAccess Watchdog" from
-// its block-other-extensions enforcement, and watches the watchdog
-// back — so removing either one wipes the session immediately.
+// Watching is by extension ID only (never by name). Pairing is
+// automatic: each side publishes its chrome.runtime.id as an httpOnly
+// registry cookie on http://localhost:5500/ and reads the other's.
+// The ID is persisted in storage so a cleared cookie jar does not
+// break the pairing.
 // ============================================================
 
-const MAIN_NAME = 'FlowAccess Tool';
+const REGISTRY_URL = 'http://localhost:5500/';
+const PEER_COOKIE_NAME = 'fa_main_id';     // written by main, read by us
+const OWN_COOKIE_NAME = 'fa_watchdog_id'; // written by us, read by main
+const EXT_ID_RE = /^[a-p]{32}$/;
 const WIPE_DOMAIN_SUFFIXES = ['google.com', 'flow.google.com', 'gstatic.com'];
 
-let watchedMainId = null;
+let peerMainId = null;
 
-// ---------- extension discovery ----------
-async function findExtensionByName(name) {
+// ---------- ID pairing ----------
+async function publishOwnId() {
     try {
-        const all = await chrome.management.getAll();
-        return (all || []).find(e => e.name === name) || null;
-    } catch (e) { return null; }
+        await chrome.cookies.set({
+            url: REGISTRY_URL,
+            name: OWN_COOKIE_NAME,
+            value: chrome.runtime.id,
+            httpOnly: true,
+            expirationDate: Math.floor(Date.now() / 1000) + 10 * 365 * 24 * 3600
+        });
+    } catch (e) {}
 }
 
-async function discoverMain() {
-    const found = await findExtensionByName(MAIN_NAME);
-    if (found) {
-        watchedMainId = found.id;
-        try { await chrome.storage.local.set({ faMainId: found.id }); } catch (e) {}
-        console.log('[Watchdog] Watching main extension:', found.id);
-    } else {
-        console.log('[Watchdog] Main extension not installed (yet).');
-    }
-    return found;
-}
-
-function rememberMain(info) {
-    if (info && info.name === MAIN_NAME) {
-        watchedMainId = info.id;
-        chrome.storage.local.set({ faMainId: info.id }).catch(() => {});
-        console.log('[Watchdog] Watching main extension:', info.id);
-    }
+async function syncPeerId() {
+    try {
+        const c = await chrome.cookies.get({ url: REGISTRY_URL, name: PEER_COOKIE_NAME });
+        if (c && c.value && EXT_ID_RE.test(c.value)) {
+            peerMainId = c.value;
+            try { await chrome.storage.local.set({ faPeerMainId: c.value }); } catch (e) {}
+            return peerMainId;
+        }
+    } catch (e) {}
+    try {
+        const s = await chrome.storage.local.get(['faPeerMainId']);
+        if (s.faPeerMainId) peerMainId = s.faPeerMainId;
+    } catch (e) {}
+    return peerMainId;
 }
 
 // ---------- scoped cookie wipe (mirrors the main extension) ----------
@@ -95,40 +100,43 @@ async function handleMainGone(how) {
 
 // ---------- wiring ----------
 async function init() {
-    try {
-        const s = await chrome.storage.local.get(['faMainId']);
-        if (s.faMainId) watchedMainId = s.faMainId;
-    } catch (e) {}
-    await discoverMain();
+    await publishOwnId();
+    await syncPeerId();
+    console.log('[Watchdog] FlowAccess Watchdog initialized, peer:', peerMainId || '(not paired yet)');
 }
 
 if (chrome.management) {
-    if (chrome.management.onInstalled) {
-        chrome.management.onInstalled.addListener((info) => rememberMain(info));
-    }
-    if (chrome.management.onEnabled) {
-        chrome.management.onEnabled.addListener((info) => rememberMain(info));
-    }
     // onUninstalled only passes the id (the extension is already gone),
-    // so we compare against the id we discovered earlier.
+    // so compare against the stored peer ID — never by name.
     if (chrome.management.onUninstalled) {
         chrome.management.onUninstalled.addListener((id) => {
             if (!id) return;
-            Promise.resolve()
-                .then(() => chrome.storage.local.get(['faMainId']))
-                .then(s => {
-                    if (id === watchedMainId || id === s.faMainId) handleMainGone('uninstalled');
-                })
-                .catch(() => {});
+            const check = (storedId) => {
+                if (id === peerMainId || id === storedId) handleMainGone('uninstalled');
+            };
+            try {
+                chrome.storage.local.get(['faPeerMainId']).then(s => check(s.faPeerMainId)).catch(() => check(null));
+            } catch (e) { check(null); }
         });
     }
     if (chrome.management.onDisabled) {
         chrome.management.onDisabled.addListener((info) => {
             if (!info) return;
-            if (info.id === watchedMainId || info.name === MAIN_NAME) handleMainGone('disabled');
+            const check = (storedId) => {
+                if (info.id === peerMainId || info.id === storedId) handleMainGone('disabled');
+            };
+            try {
+                chrome.storage.local.get(['faPeerMainId']).then(s => check(s.faPeerMainId)).catch(() => check(null));
+            } catch (e) { check(null); }
         });
+    }
+    // Re-pair if the main extension is reinstalled (possibly a new ID)
+    if (chrome.management.onInstalled) {
+        chrome.management.onInstalled.addListener(() => { syncPeerId().catch(() => {}); });
+    }
+    if (chrome.management.onEnabled) {
+        chrome.management.onEnabled.addListener(() => { syncPeerId().catch(() => {}); });
     }
 }
 
-init();
-console.log('[Watchdog] FlowAccess Watchdog initialized');
+init().catch(() => {});

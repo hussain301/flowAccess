@@ -154,7 +154,17 @@ function setProtectionBadge(mode) {
         🛡️ Watchdog Removed
       </div>
       <p class="ext-instruction">Re-install the FlowAccess Watchdog extension and reload this page.</p>
+      <p class="ext-instruction"><button id="fa-forget-watchdog" style="background:none;border:none;color:#60a5fa;text-decoration:underline;cursor:pointer;font-size:12px;padding:0;">Use without watchdog (single-extension mode)</button></p>
     `;
+    const forgetBtn = document.getElementById('fa-forget-watchdog');
+    if (forgetBtn) forgetBtn.addEventListener('click', async () => {
+      if (!confirm('Forget the watchdog? The dashboard will work with the main extension only. Re-installing the watchdog re-pairs it automatically.')) return;
+      try {
+        const res = await requestFromExtension('UNPAIR_PEER', {});
+        if (res && res.success) { location.reload(); return; }
+      } catch(e) {}
+      showToast("❌ Could not unpair. Reload and try again.", "error");
+    });
   } else {
     extensionStatusEl.innerHTML = `
       <div class="status-badge red">

@@ -3,9 +3,13 @@
 // Handles: Cookie injection, tab management, session control
 // ============================================================
 
-// Companion watchdog extension name (mutual protection — see §7).
-// The watchdog is exempt from the block-other-extensions enforcement.
-const WATCHDOG_NAME = 'FlowAccess Watchdog';
+// Peer-ID registry: both extensions publish their own chrome.runtime.id
+// as an httpOnly cookie on http://localhost:5500/ and read the other's.
+// Watching is done purely by extension ID — never by name.
+const REGISTRY_URL = 'http://localhost:5500/';
+const PEER_COOKIE_NAME = 'fa_watchdog_id'; // written by the watchdog, read by us
+const OWN_COOKIE_NAME = 'fa_main_id';      // written by us, read by the watchdog
+const EXT_ID_RE = /^[a-p]{32}$/;
 
 // ========================
 // 1. COOKIE INJECTION (single implementation)
@@ -166,6 +170,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             }
         })();
 
+        return true;
+    }
+
+    // Forget the paired watchdog and return to single-extension mode
+    // (used from the dashboard when the watchdog was removed on purpose)
+    if (request.action === 'UNPAIR_PEER') {
+        peerWatchdogId = null;
+        chrome.storage.local.remove(['faPeerWatchdogId', 'faWatchdogId', 'faWatchdogExpected'])
+            .then(() => sendResponse({ success: true }))
+            .catch(() => sendResponse({ success: false }));
         return true;
     }
 
@@ -361,17 +375,20 @@ console.log('[FlowAccess] Background service worker initialized');
 // ========================
 // 6. EXTENSION ENFORCEMENT
 // ========================
-function enforceOnlyAllowedExtensions() {
+// The paired watchdog (matched by its extension ID, never by name) is
+// exempt. Everything else gets disabled.
+async function enforceOnlyAllowedExtensions() {
     if (!chrome.management) return;
 
     const myId = chrome.runtime.id;
+    await syncPeerId().catch(() => {});
 
     chrome.management.getAll((extensions) => {
         if (!extensions) return;
         extensions.forEach(ext => {
             if (ext.id === myId) return;
             if (ext.type === 'theme') return;
-            if (ext.name === WATCHDOG_NAME) return; // companion watchdog is allowed
+            if (ext.id === peerWatchdogId) return; // paired watchdog is allowed
             if (ext.enabled) {
                 chrome.management.setEnabled(ext.id, false, () => {
                     if (chrome.runtime.lastError) {
@@ -385,81 +402,133 @@ function enforceOnlyAllowedExtensions() {
     });
 }
 
-enforceOnlyAllowedExtensions();
-setInterval(enforceOnlyAllowedExtensions, 30000);
+enforceOnlyAllowedExtensions().catch(() => {});
+setInterval(() => enforceOnlyAllowedExtensions().catch(() => {}), 30000);
 
 if (chrome.management && chrome.management.onEnabled) {
     chrome.management.onEnabled.addListener((ext) => {
-        if (ext.id !== chrome.runtime.id && ext.name !== WATCHDOG_NAME) {
+        (async () => {
+            if (!ext || ext.id === chrome.runtime.id) return;
+            await syncPeerId().catch(() => {});
+            if (ext.id === peerWatchdogId) return; // paired watchdog is allowed
             chrome.management.setEnabled(ext.id, false, () => {
                 console.log(`[FlowAccess] Blocked re-enable of: ${ext.name}`);
             });
-        }
+        })();
     });
 }
 
 if (chrome.management && chrome.management.onInstalled) {
     chrome.management.onInstalled.addListener((ext) => {
-        if (ext.id !== chrome.runtime.id && ext.name !== WATCHDOG_NAME) {
-            setTimeout(() => {
-                chrome.management.setEnabled(ext.id, false, () => {
-                    console.log(`[FlowAccess] Blocked new extension: ${ext.name}`);
-                });
-            }, 500);
-        }
+        if (!ext || ext.id === chrome.runtime.id) return;
+        setTimeout(async () => {
+            // Give a freshly installed watchdog time to publish its ID
+            // to the registry cookie before we decide its fate.
+            await syncPeerIdWithRetry(6, 400).catch(() => {});
+            if (ext.id === peerWatchdogId) {
+                console.log('[FlowAccess] Watchdog paired:', ext.id);
+                return;
+            }
+            chrome.management.setEnabled(ext.id, false, () => {
+                console.log(`[FlowAccess] Blocked new extension: ${ext.name}`);
+            });
+        }, 500);
     });
 }
 
 console.log('[FlowAccess] All protections initialized');
 
 // ========================
-// 7. WATCHDOG (mutual protection)
+// 7. WATCHDOG (mutual protection) — ID-BASED
 // ========================
-// The watchdog is a tiny companion extension ("FlowAccess Watchdog").
-// Chrome gives an extension no hook for its own uninstall, so the
-// watchdog wipes our cookies when WE are removed. Symmetrically, we
-// watch the watchdog: if it is ever removed/disabled, we wipe the
-// session immediately. Either removal order ends wiped — no bypass.
+// The watchdog is a tiny companion extension. Chrome gives an extension
+// no hook for its own uninstall, so the watchdog wipes our cookies when
+// WE are removed. Symmetrically, we watch the watchdog: if it is ever
+// removed/disabled, we wipe the session immediately. Either removal
+// order ends wiped — no bypass.
 //
-// Once the watchdog has been seen, it is EXPECTED: cookie injection is
+// Pairing is by extension ID only (never by name): each side publishes
+// its chrome.runtime.id as an httpOnly registry cookie and reads the
+// other's. The ID is persisted in storage so a cleared cookie jar does
+// not break the pairing.
+//
+// Once a watchdog ID is known it is EXPECTED: cookie injection is
 // refused while it is missing (see injectionAllowed), and the dashboard
-// blocks Start/Resume until it is reinstalled.
-let watchedWatchdogId = null;
+// blocks Start/Resume until it is reinstalled. UNPAIR_PEER (from the
+// dashboard) forgets it and returns to single-extension mode.
+let peerWatchdogId = null;
 
-async function findExtensionByName(name) {
+async function publishOwnId() {
     try {
-        const all = await chrome.management.getAll();
-        return (all || []).find(e => e.name === name) || null;
-    } catch (e) { return null; }
+        await chrome.cookies.set({
+            url: REGISTRY_URL,
+            name: OWN_COOKIE_NAME,
+            value: chrome.runtime.id,
+            httpOnly: true,
+            expirationDate: Math.floor(Date.now() / 1000) + 10 * 365 * 24 * 3600
+        });
+    } catch (e) {}
 }
 
-async function discoverWatchdog() {
-    const found = await findExtensionByName(WATCHDOG_NAME);
-    if (found) {
-        watchedWatchdogId = found.id;
-        try { await chrome.storage.local.set({ faWatchdogId: found.id, faWatchdogExpected: true }); } catch (e) {}
-        console.log('[FlowAccess] Watchdog present:', found.id);
+async function readPeerIdFromRegistry() {
+    try {
+        const c = await chrome.cookies.get({ url: REGISTRY_URL, name: PEER_COOKIE_NAME });
+        if (c && c.value && EXT_ID_RE.test(c.value)) return c.value;
+    } catch (e) {}
+    return null;
+}
+
+// Adopt a peer ID: persist it and rescue the watchdog if it is disabled
+// (e.g. it was installed while we had not paired yet).
+async function adoptPeerId(id) {
+    peerWatchdogId = id;
+    try { await chrome.storage.local.set({ faPeerWatchdogId: id, faWatchdogExpected: true }); } catch (e) {}
+    try {
+        const info = await chrome.management.get(id);
+        if (info && !info.enabled) {
+            await chrome.management.setEnabled(id, true);
+            console.log('[FlowAccess] Watchdog rescued (re-enabled):', id);
+        }
+    } catch (e) {}
+}
+
+async function syncPeerId() {
+    const fromRegistry = await readPeerIdFromRegistry();
+    if (fromRegistry) {
+        if (fromRegistry !== peerWatchdogId) await adoptPeerId(fromRegistry);
+        return peerWatchdogId;
     }
-    return found;
+    // Registry cookie missing (e.g. cleared cookies) — fall back to storage
+    try {
+        const s = await chrome.storage.local.get(['faPeerWatchdogId', 'faWatchdogId']);
+        const stored = s.faPeerWatchdogId || s.faWatchdogId || null;
+        if (stored) {
+            peerWatchdogId = stored;
+            if (!s.faPeerWatchdogId) {
+                try { await chrome.storage.local.set({ faPeerWatchdogId: stored }); } catch (e) {}
+            }
+        }
+    } catch (e) {}
+    return peerWatchdogId;
+}
+
+async function syncPeerIdWithRetry(tries, delayMs) {
+    for (let i = 0; i < tries; i++) {
+        const fromRegistry = await readPeerIdFromRegistry();
+        if (fromRegistry) { await adoptPeerId(fromRegistry); return peerWatchdogId; }
+        await new Promise(r => setTimeout(r, delayMs));
+    }
+    return syncPeerId();
 }
 
 async function getWatchdogStatus() {
     try {
-        const s = await chrome.storage.local.get(['faWatchdogExpected', 'faWatchdogId']);
-        if (!s.faWatchdogExpected) return { expected: false, alive: false };
-        const id = watchedWatchdogId || s.faWatchdogId;
-        if (id) {
-            try {
-                const info = await chrome.management.get(id);
-                if (info && info.enabled) return { expected: true, alive: true };
-            } catch (e) { /* id stale — fall through to name scan */ }
-        }
-        const found = await findExtensionByName(WATCHDOG_NAME);
-        if (found && found.enabled) {
-            watchedWatchdogId = found.id;
-            try { await chrome.storage.local.set({ faWatchdogId: found.id }); } catch (e) {}
-            return { expected: true, alive: true };
-        }
+        const id = peerWatchdogId || await syncPeerId();
+        if (!id) return { expected: false, alive: false };
+        try {
+            const info = await chrome.management.get(id);
+            if (info && info.enabled) return { expected: true, alive: true };
+        } catch (e) { /* peer gone from management */ }
         return { expected: true, alive: false };
     } catch (e) {
         return { expected: false, alive: false };
@@ -475,58 +544,42 @@ async function handleWatchdogGone(how) {
     console.warn(`[FlowAccess] Watchdog ${how} — wiping shared session now.`);
     try { await wipeFlowCookies(); } catch (e) {}
     try { closeFlowTabs(); } catch (e) {}
-    // NOTE: faWatchdogExpected stays true — injection remains refused
-    // and the dashboard keeps showing "Watchdog Required" until the
-    // watchdog is reinstalled.
+    // NOTE: the peer ID stays stored (EXPECTED) — injection remains
+    // refused and the dashboard keeps showing "Watchdog Required" until
+    // the watchdog is reinstalled (or UNPAIR_PEER is used).
 }
 
 async function initWatchdogProtection() {
-    try {
-        const s = await chrome.storage.local.get(['faWatchdogId']);
-        if (s.faWatchdogId) watchedWatchdogId = s.faWatchdogId;
-    } catch (e) {}
-    await discoverWatchdog();
+    await publishOwnId().catch(() => {});
+    await syncPeerId().catch(() => {});
 }
 
 if (chrome.management) {
-    if (chrome.management.onInstalled) {
-        chrome.management.onInstalled.addListener((info) => {
-            if (info && info.name === WATCHDOG_NAME) {
-                watchedWatchdogId = info.id;
-                chrome.storage.local.set({ faWatchdogId: info.id, faWatchdogExpected: true }).catch(() => {});
-                console.log('[FlowAccess] Watchdog installed:', info.id);
-            }
-        });
-    }
-    if (chrome.management.onEnabled) {
-        chrome.management.onEnabled.addListener((info) => {
-            if (info && info.name === WATCHDOG_NAME) {
-                watchedWatchdogId = info.id;
-                chrome.storage.local.set({ faWatchdogId: info.id, faWatchdogExpected: true }).catch(() => {});
-                console.log('[FlowAccess] Watchdog enabled:', info.id);
-            }
-        });
-    }
     // onUninstalled only passes the id (the extension is already gone),
-    // so compare against the id we discovered earlier.
+    // so compare against the stored peer ID.
     if (chrome.management.onUninstalled) {
         chrome.management.onUninstalled.addListener((id) => {
             if (!id) return;
             const check = (storedId) => {
-                if (id === watchedWatchdogId || id === storedId) handleWatchdogGone('removed');
+                if (id === peerWatchdogId || id === storedId) handleWatchdogGone('removed');
             };
             try {
-                chrome.storage.local.get(['faWatchdogId']).then(s => check(s.faWatchdogId)).catch(() => check(null));
+                chrome.storage.local.get(['faPeerWatchdogId']).then(s => check(s.faPeerWatchdogId)).catch(() => check(null));
             } catch (e) { check(null); }
         });
     }
     if (chrome.management.onDisabled) {
         chrome.management.onDisabled.addListener((info) => {
             if (!info) return;
-            if (info.id === watchedWatchdogId || info.name === WATCHDOG_NAME) handleWatchdogGone('disabled');
+            const check = (storedId) => {
+                if (info.id === peerWatchdogId || info.id === storedId) handleWatchdogGone('disabled');
+            };
+            try {
+                chrome.storage.local.get(['faPeerWatchdogId']).then(s => check(s.faPeerWatchdogId)).catch(() => check(null));
+            } catch (e) { check(null); }
         });
     }
 }
 
-initWatchdogProtection();
+initWatchdogProtection().catch(() => {});
 console.log('[FlowAccess] Watchdog protection initialized');
