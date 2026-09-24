@@ -157,9 +157,21 @@
             <button class="btn btn-secondary" onclick="loadUsers()">🔄 Refresh</button>
           </div>
         </div>
+        <div class="users-toolbar">
+          <div class="search-box">
+            <input type="text" id="userSearch" placeholder="🔍 Search by email or name..." oninput="onUserSearchInput(this.value)" autocomplete="off">
+            <button class="btn btn-sm btn-secondary" onclick="clearUserSearch()" title="Clear search">✕</button>
+          </div>
+          <span id="usersTotal" class="users-total"></span>
+        </div>
         <div class="table-card">
           <table><thead><tr><th>Email</th><th>Name</th><th>Time Limit</th><th>Usage</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="usersBody"><tr><td colspan="6" style="color:var(--muted);text-align:center;">Loading...</td></tr></tbody></table>
+          <div class="pagination">
+            <button class="btn btn-sm btn-secondary" id="userPrevBtn" onclick="userPrevPage()">← Prev</button>
+            <span id="userPageInfo" class="page-info"></span>
+            <button class="btn btn-sm btn-secondary" id="userNextBtn" onclick="userNextPage()">Next →</button>
+          </div>
         </div>
       </div>
 
@@ -294,7 +306,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
-import { getFirestore, collection, getDocs, getDoc, doc, updateDoc, deleteDoc, setDoc, addDoc, query, orderBy, limit, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, getDoc, doc, updateDoc, deleteDoc, setDoc, addDoc, query, orderBy, limit, serverTimestamp, where, getCountFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 import { encryptCookies } from '../website/js/cookie-crypto.js';
 
 const app = initializeApp({
@@ -375,20 +387,16 @@ onAuthStateChanged(auth, async (user) => {
 // --- Dashboard ---
 async function loadDashboard() {
   try {
-    const usersSnap = await getDocs(collection(db, 'users'));
-    $('statUsers').textContent = usersSnap.size;
-    const sessionsSnap = await getDocs(collection(db, 'sessions'));
-    $('statTotal').textContent = sessionsSnap.size;
-    let active = 0, today = 0;
+    // Server-side counts (cheap) — poori collections parhe baghair stats
+    const usersCount = await getCountFromServer(collection(db, 'users'));
+    $('statUsers').textContent = usersCount.data().count;
+    const sessionsCount = await getCountFromServer(collection(db, 'sessions'));
+    $('statTotal').textContent = sessionsCount.data().count;
     const dayStart = new Date(); dayStart.setHours(0,0,0,0);
-    sessionsSnap.forEach(d => {
-      const s = d.data();
-      if (s.status === 'Active') active++;
-      const t = s.startTime?.toMillis ? s.startTime.toMillis() : 0;
-      if (t > dayStart.getTime()) today++;
-    });
-    $('statActive').textContent = active;
-    $('statToday').textContent = today;
+    const activeCount = await getCountFromServer(query(collection(db, 'sessions'), where('status', '==', 'Active')));
+    $('statActive').textContent = activeCount.data().count;
+    const todayCount = await getCountFromServer(query(collection(db, 'sessions'), where('startTime', '>=', Timestamp.fromDate(dayStart))));
+    $('statToday').textContent = todayCount.data().count;
 
     const rq = query(collection(db, 'sessions'), orderBy('startTime', 'desc'), limit(10));
     const rSnap = await getDocs(rq);
@@ -402,54 +410,115 @@ async function loadDashboard() {
   } catch(e) { console.error('Dashboard error:', e); }
 }
 
-// --- Users ---
+// --- Users: 10-per-page + email/name search ---
+const USERS_PAGE_SIZE = 10;
+let allUsersCache = [];   // [{id, data}] — loadUsers() par fetch hota hai, paging isi par hoti hai
+let userUsageCache = {};  // userId -> last 24h used ms
+let userSearchTerm = '';
+let userCurrentPage = 0;
+let userSearchTimer = null;
+
 async function loadUsers() {
   try {
     const snap = await getDocs(collection(db, 'users'));
-    const tbody = $('usersBody');
-    tbody.innerHTML = '';
-    if (snap.empty) { tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);text-align:center;">No users yet. Create one!</td></tr>'; return; }
-    
-    // Get sessions to show usage
-    const sessionsSnap = await getDocs(collection(db, 'sessions'));
-    const now = new Date();
-    const dayAgo = new Date(now.getTime() - 24*60*60*1000);
-    
-    // Calculate per-user usage in last 24h
-    const userUsage = {};
-    sessionsSnap.forEach(d => {
+    allUsersCache = [];
+    snap.forEach(d => allUsersCache.push({ id: d.id, data: d.data() }));
+    // stable order: email ascending
+    allUsersCache.sort((a, b) => (a.data.email || '').localeCompare(b.data.email || ''));
+
+    // Usage ke liye SIRF last-24h sessions — poori history kabhi nahi parhte
+    const dayAgo = Timestamp.fromDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    const sSnap = await getDocs(query(collection(db, 'sessions'), where('startTime', '>=', dayAgo)));
+    userUsageCache = {};
+    sSnap.forEach(d => {
       const s = d.data();
-      if (!s.userId) return;
-      const startMs = s.startTime?.toMillis ? s.startTime.toMillis() : (s.startedAt?.toMillis ? s.startedAt.toMillis() : 0);
-      if (startMs > dayAgo.getTime() && s.status !== 'AdminReset') {
-        if (!userUsage[s.userId]) userUsage[s.userId] = 0;
-        userUsage[s.userId] += (s.durationMs || 0);
-      }
+      if (!s.userId || s.status === 'AdminReset') return;
+      userUsageCache[s.userId] = (userUsageCache[s.userId] || 0) + (s.durationMs || 0);
     });
-    
-    snap.forEach(d => {
-      const u = d.data();
-      const tl = u.timeLimitMinutes || 180;
-      const banned = u.isBanned === true;
-      const usedMs = userUsage[d.id] || 0;
-      const usedMin = Math.round(usedMs / 60000);
-      const remainMin = Math.max(0, tl - usedMin);
-      const isExpired = remainMin <= 0 && usedMin > 0;
-      
-      tbody.innerHTML += `<tr>
-        <td>${u.email||'-'}</td><td>${u.displayName||'-'}</td>
-        <td><span class="badge badge-active" style="cursor:pointer" onclick="openEditTime('${d.id}',${tl})">${tl} min ✏️</span></td>
-        <td>${usedMin} / ${tl} min <span style="color:${isExpired?'#ef4444':'#10b981'};font-size:0.7rem;">(${remainMin} left)</span></td>
-        <td><span class="badge ${banned?'badge-banned':isExpired?'badge-inactive':'badge-active'}">${banned?'Banned':isExpired?'Expired':'Active'}</span></td>
-        <td class="actions-cell">
-          <button class="btn btn-sm btn-secondary" onclick="openEditTime('${d.id}',${tl})">⏱️</button>
-          <button class="btn btn-sm btn-primary" onclick="resetUserSession('${d.id}','${u.email||''}',${tl})" title="Reset session - give fresh time">🔄 Reset</button>
-          <button class="btn btn-sm ${banned?'btn-primary':'btn-danger'}" onclick="toggleBan('${d.id}',${banned})">${banned?'Unban':'Ban'}</button>
-        </td></tr>`;
-    });
+
+    renderUsersPage();
   } catch(e) { console.error('Users error:', e); toast('Users load error: '+e.message, 'error'); }
 }
 window.loadUsers = loadUsers;
+
+function getFilteredUsers() {
+  const t = userSearchTerm.trim().toLowerCase();
+  if (!t) return allUsersCache;
+  return allUsersCache.filter(u =>
+    (u.data.email || '').toLowerCase().includes(t) ||
+    (u.data.displayName || '').toLowerCase().includes(t));
+}
+
+function renderUsersPage() {
+  const tbody = $('usersBody');
+  const list = getFilteredUsers();
+  const total = list.length;
+  const totalPages = Math.max(1, Math.ceil(total / USERS_PAGE_SIZE));
+  if (userCurrentPage >= totalPages) userCurrentPage = totalPages - 1;
+  if (userCurrentPage < 0) userCurrentPage = 0;
+  const start = userCurrentPage * USERS_PAGE_SIZE;
+  const page = list.slice(start, start + USERS_PAGE_SIZE);
+
+  if (!page.length) {
+    const msg = !total
+      ? (userSearchTerm ? 'No users match your search.' : 'No users yet. Create one!')
+      : 'No users on this page.';
+    tbody.innerHTML = `<tr><td colspan="6" style="color:var(--muted);text-align:center;">${msg}</td></tr>`;
+  } else {
+    tbody.innerHTML = '';
+    page.forEach(({ id, data: u }) => {
+      const tl = u.timeLimitMinutes || 180;
+      const banned = u.isBanned === true;
+      const usedMin = Math.round((userUsageCache[id] || 0) / 60000);
+      const remainMin = Math.max(0, tl - usedMin);
+      const isExpired = remainMin <= 0 && usedMin > 0;
+
+      tbody.innerHTML += `<tr>
+        <td>${u.email||'-'}</td><td>${u.displayName||'-'}</td>
+        <td><span class="badge badge-active" style="cursor:pointer" onclick="openEditTime('${id}',${tl})">${tl} min ✏️</span></td>
+        <td>${usedMin} / ${tl} min <span style="color:${isExpired?'#ef4444':'#10b981'};font-size:0.7rem;">(${remainMin} left)</span></td>
+        <td><span class="badge ${banned?'badge-banned':isExpired?'badge-inactive':'badge-active'}">${banned?'Banned':isExpired?'Expired':'Active'}</span></td>
+        <td class="actions-cell">
+          <button class="btn btn-sm btn-secondary" onclick="openEditTime('${id}',${tl})">⏱️</button>
+          <button class="btn btn-sm btn-primary" onclick="resetUserSession('${id}','${u.email||''}',${tl})" title="Reset session - give fresh time">🔄 Reset</button>
+          <button class="btn btn-sm ${banned?'btn-primary':'btn-danger'}" onclick="toggleBan('${id}',${banned})">${banned?'Unban':'Ban'}</button>
+        </td></tr>`;
+    });
+  }
+
+  // total + paging controls
+  const from = total ? start + 1 : 0;
+  const to = Math.min(start + USERS_PAGE_SIZE, total);
+  $('usersTotal').textContent = `Total: ${total} user${total === 1 ? '' : 's'}`;
+  $('userPageInfo').textContent = total ? `Showing ${from}–${to} of ${total} • Page ${userCurrentPage + 1} of ${totalPages}` : '';
+  $('userPrevBtn').disabled = userCurrentPage <= 0;
+  $('userNextBtn').disabled = userCurrentPage >= totalPages - 1;
+}
+
+// live search (debounced) — email ya name me kahin bhi match
+window.onUserSearchInput = function(v) {
+  clearTimeout(userSearchTimer);
+  userSearchTimer = setTimeout(() => {
+    userSearchTerm = v;
+    userCurrentPage = 0;
+    renderUsersPage();
+  }, 300);
+};
+
+window.clearUserSearch = function() {
+  $('userSearch').value = '';
+  userSearchTerm = '';
+  userCurrentPage = 0;
+  renderUsersPage();
+};
+
+window.userPrevPage = function() {
+  if (userCurrentPage > 0) { userCurrentPage--; renderUsersPage(); }
+};
+
+window.userNextPage = function() {
+  userCurrentPage++; renderUsersPage();
+};
 
 window.openCreateUser = () => $('createUserModal').classList.remove('hidden');
 
@@ -471,6 +540,7 @@ window.createUser = async (e) => {
     });
     toast(`✅ User created: ${email}`, 'success');
     $('createUserModal').classList.add('hidden');
+    userCurrentPage = 0; // naya user list me kahin bhi ho sakta hai — pehle page par lao
     loadUsers(); loadDashboard();
   } catch(err) {
     let msg = err.message;

@@ -465,3 +465,38 @@ h3 { font-size: 1rem; }
   .sidebar { position: absolute; transform: translateX(-100%); transition: var(--transition); z-index: 50; }
   .sidebar.open { transform: translateX(0); }
 }
+
+/* Users toolbar: search + total */
+.users-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.search-box { display: flex; gap: 8px; align-items: center; }
+.search-box input {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--panel-border);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  width: 280px;
+  outline: none;
+}
+.search-box input:focus { border-color: var(--accent-color); }
+.users-total { color: var(--text-secondary); font-size: 13px; }
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--panel-border);
+}
+.page-info { color: var(--text-secondary); font-size: 13px; }
+.pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
