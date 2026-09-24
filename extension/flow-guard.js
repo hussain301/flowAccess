@@ -303,20 +303,49 @@
     }
 
     // ============================
-    // 5. SIGN-OUT PURGE
+    // 5. SIGN-OUT PURGE (surgical)
     // ============================
+    // Only the actual sign-out/account ITEMS are hidden. Matching is done
+    // on each element's OWN text (direct text nodes only) — never on the
+    // whole subtree — so menu/panel containers are never nuked and the
+    // rest of their options keep working.
+    const SIGNOUT_PHRASES = [
+        'sign out', 'log out', 'switch account',
+        'add another account', 'manage your google account'
+    ];
+
+    function ownText(el) {
+        let s = '';
+        const nodes = el.childNodes;
+        for (let i = 0; i < nodes.length; i++) {
+            if (nodes[i].nodeType === Node.TEXT_NODE) s += nodes[i].textContent;
+        }
+        return s.trim().toLowerCase();
+    }
+
+    function isSignoutLabel(t) {
+        if (!t) return false;
+        for (const p of SIGNOUT_PHRASES) {
+            if (t === p || t.indexOf(p + ' ') === 0) return true;
+        }
+        return false;
+    }
+
     function purgeSignout() {
-        document.querySelectorAll('button, a, span, div, p, [role="menuitem"]').forEach(el => {
-            if (el.children.length > 5) return;
-            const t = (el.textContent || '').trim().toLowerCase();
-            if (t === 'sign out' || t === 'log out' || t === 'switch account' ||
-                t === 'add another account' || t === 'manage your google account' ||
-                t.includes('sign out')) {
-                el.setAttribute('data-fa-hidden', '1');
-                const mi = el.closest('[role="menuitem"]') || el.closest('flow-menu-item');
-                if (mi) mi.setAttribute('data-fa-hidden', '1');
+        const els = document.querySelectorAll('button, a, span, div, p, li, [role="menuitem"], [role="option"]');
+        for (const el of els) {
+            if (el.hasAttribute('data-fa-hidden')) continue;
+            if (!isSignoutLabel(ownText(el))) continue;
+            el.setAttribute('data-fa-hidden', '1');
+            // Also hide the nearest single-action wrapper,
+            // e.g. <button><span>Sign out</span></button> -> hide the button.
+            // The wrapper must not contain other actions, so real menus survive.
+            const wrap = el.closest('button, a, li, [role="menuitem"], [role="option"]');
+            if (wrap && wrap !== el &&
+                wrap.querySelectorAll('button, a, [role="menuitem"], [role="option"]').length === 0) {
+                wrap.setAttribute('data-fa-hidden', '1');
             }
-        });
+        }
     }
 
     // ============================
@@ -358,9 +387,15 @@
         const t = e.target.closest('a, button, [role="menuitem"]');
         if (!t) return;
         const href = (t.getAttribute('href') || '').toLowerCase();
-        const txt = (t.textContent || '').toLowerCase();
+        // Label = own text; fall back to subtree text only for simple
+        // label wrappers like <button><span>Sign out</span></button>.
+        // (Never the whole subtree of a complex container.)
+        let label = ownText(t);
+        if (!label && t.children.length <= 2) {
+            label = (t.textContent || '').trim().toLowerCase();
+        }
         if (href.includes('logout') || href.includes('signout') || href.includes('accounts.google.com') ||
-            txt.includes('sign out') || txt.includes('switch account')) {
+            label.includes('sign out') || label.includes('switch account')) {
             e.preventDefault(); e.stopImmediatePropagation(); return false;
         }
         if (t.tagName === 'BUTTON' && looksLikeGenerateButton(t)) {
