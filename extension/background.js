@@ -229,7 +229,6 @@ const blockedDomains = [
     "flights.google.com", "ads.google.com", "analytics.google.com",
     "www.blogger.com", "sites.google.com", "search.google.com",
     "one.google.com", "cloud.google.com", "about.google",
-    "myaccount.google.com",
     "chromewebstore.google.com", "chrome.google.com"
 ];
 

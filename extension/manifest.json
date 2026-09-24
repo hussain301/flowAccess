@@ -26,14 +26,6 @@
       "matches": ["*://flow.google.com/*"],
       "js": ["flow-guard.js"],
       "run_at": "document_start"
-    },
-    {
-      "matches": [
-        "https://accounts.google.com/*",
-        "https://myaccount.google.com/*"
-      ],
-      "js": ["accounts-guard.js"],
-      "run_at": "document_start"
     }
   ],
   "action": {

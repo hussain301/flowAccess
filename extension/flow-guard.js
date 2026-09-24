@@ -131,15 +131,6 @@
         #fa-save-btn:hover { background: #1557b0 !important; transform: translateY(-2px) !important; }
         #fa-save-btn.saved { background: #0d9488 !important; }
 
-        /* --- Hide Sign-out --- */
-        [data-fa-hidden] { display:none!important; pointer-events:none!important; height:0!important; overflow:hidden!important; }
-
-        /* --- Hide Account Switcher / Google Apps --- */
-        a.switch-account-link,
-        a[href*="AccountChooser"], a[href*="AddSession"],
-        a[href*="accounts.google.com"], a[href*="myaccount.google"],
-        [aria-label="Google apps"], [aria-label="Google Account"] { display:none!important; }
-
         /* --- Hide Credit Banner (original) --- */
         flow-credit-banner, .credit-banner { display:none!important; }
 
@@ -303,72 +294,6 @@
     }
 
     // ============================
-    // 5. SIGN-OUT PURGE (surgical)
-    // ============================
-    // Only the actual sign-out/account ITEMS are hidden. Matching is done
-    // on each element's OWN text (direct text nodes only) — never on the
-    // whole subtree — so menu/panel containers are never nuked and the
-    // rest of their options keep working.
-    const SIGNOUT_PHRASES = [
-        'sign out', 'log out', 'switch account',
-        'add another account', 'manage your google account'
-    ];
-
-    function ownText(el) {
-        let s = '';
-        const nodes = el.childNodes;
-        for (let i = 0; i < nodes.length; i++) {
-            if (nodes[i].nodeType === Node.TEXT_NODE) s += nodes[i].textContent;
-        }
-        return s.trim().toLowerCase();
-    }
-
-    function isSignoutLabel(t) {
-        if (!t) return false;
-        for (const p of SIGNOUT_PHRASES) {
-            if (t === p || t.indexOf(p + ' ') === 0) return true;
-        }
-        return false;
-    }
-
-    function purgeSignout() {
-        const els = document.querySelectorAll('button, a, span, div, p, li, [role="menuitem"], [role="option"]');
-        for (const el of els) {
-            if (el.hasAttribute('data-fa-hidden')) continue;
-            if (!isSignoutLabel(ownText(el))) continue;
-            el.setAttribute('data-fa-hidden', '1');
-            // Also hide the nearest single-action wrapper,
-            // e.g. <button><span>Sign out</span></button> -> hide the button.
-            // The wrapper must not contain other actions, so real menus survive.
-            const wrap = el.closest('button, a, li, [role="menuitem"], [role="option"]');
-            if (wrap && wrap !== el &&
-                wrap.querySelectorAll('button, a, [role="menuitem"], [role="option"]').length === 0) {
-                wrap.setAttribute('data-fa-hidden', '1');
-            }
-        }
-    }
-
-    // ============================
-    // 6. HIDE ACCOUNT INFO
-    // ============================
-    function hideAccount() {
-        document.querySelectorAll('img').forEach(img => {
-            if ((img.src || '').includes('googleusercontent.com')) {
-                img.style.visibility = 'hidden';
-                img.style.opacity = '0';
-            }
-        });
-        document.querySelectorAll('div, span').forEach(el => {
-            if (el.children.length > 2) return;
-            const t = (el.textContent || '').trim();
-            if (t.match(/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/) && el.tagName !== 'INPUT') {
-                el.style.color = 'transparent';
-                el.style.fontSize = '0';
-            }
-        });
-    }
-
-    // ============================
     // 7. KEYBOARD + CONTEXT MENU BLOCK
     // ============================
     document.addEventListener('keydown', e => {
@@ -381,23 +306,13 @@
     document.addEventListener('contextmenu', e => { e.preventDefault(); }, true);
 
     // ============================
-    // 8. CLICK INTERCEPT (sign-out block + generation deduction)
+    // 8. CLICK INTERCEPT (generation deduction only)
     // ============================
+    // NOTE: account menu (avatar, switch account, sign out) is intentionally
+    // left fully original — no blocking here.
     document.addEventListener('click', e => {
         const t = e.target.closest('a, button, [role="menuitem"]');
         if (!t) return;
-        const href = (t.getAttribute('href') || '').toLowerCase();
-        // Label = own text; fall back to subtree text only for simple
-        // label wrappers like <button><span>Sign out</span></button>.
-        // (Never the whole subtree of a complex container.)
-        let label = ownText(t);
-        if (!label && t.children.length <= 2) {
-            label = (t.textContent || '').trim().toLowerCase();
-        }
-        if (href.includes('logout') || href.includes('signout') || href.includes('accounts.google.com') ||
-            label.includes('sign out') || label.includes('switch account')) {
-            e.preventDefault(); e.stopImmediatePropagation(); return false;
-        }
         if (t.tagName === 'BUTTON' && looksLikeGenerateButton(t)) {
             deductForGeneration();
         }
@@ -410,8 +325,6 @@
         watchCredits();
         renderFakeCredits();
         detectModel();
-        purgeSignout();
-        hideAccount();
         blurOtherProjects();
     }, 2000);
 
@@ -431,8 +344,6 @@
         renderFakeCredits();
         detectModel();
         showSaveButton();
-        purgeSignout();
-        hideAccount();
         blurOtherProjects();
     }
 
