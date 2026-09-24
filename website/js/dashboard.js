@@ -15,6 +15,11 @@ let remainingTimeMs = DEFAULT_TIME_MS;
 let timerInterval = null;
 let isExtensionReady = false;
 let isPaused = false;
+// Liveness tracking: the dataset beacon only proves the extension was
+// present at page load — uninstalling does NOT clear it from this page,
+// so we re-verify with a PING every few seconds.
+let extensionAlive = false;
+let extensionConfirmedOnce = false;
 let activeEndpointUrl = null;
 let activeCookies = null; // direct cookie set from Firebase (preferred over endpoint)
 
@@ -73,6 +78,9 @@ onAuthChange(async (user) => {
   // Check extension
   checkExtension();
 
+  // Watch for mid-session extension removal (uninstall/disable)
+  setInterval(monitorExtension, 10000);
+
   // Saved projects (from extension storage)
   loadSavedProjects();
 
@@ -103,29 +111,139 @@ function showToast(message, type = 'error') {
 
 // === EXTENSION DETECTION ===
 function checkExtension() {
-  if (document.documentElement.dataset.flowAccessExtension === 'true') {
+  const beacon = document.documentElement.dataset.flowAccessExtension === 'true';
+  extensionAlive = beacon;
+  extensionConfirmedOnce = beacon;
+  if (beacon) {
     setExtensionReady();
   } else {
-    extensionStatusEl.innerHTML = `
-      <div class="status-badge red">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
-        Extension Not Detected
-      </div>
-      <p class="ext-instruction">Please install and enable the FlowAccess extension.</p>
-    `;
+    updateExtensionStatusUI(false, false);
   }
   document.addEventListener('FLOW_ACCESS_EXTENSION_READY', setExtensionReady);
 }
 
 function setExtensionReady() {
   isExtensionReady = true;
-  extensionStatusEl.innerHTML = `
-    <div class="status-badge green">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
-      Extension Ready
-    </div>
-  `;
+  extensionAlive = true;
+  extensionConfirmedOnce = true;
+  updateExtensionStatusUI(true, false);
+  hideExtensionLostOverlay();
   updateButtonStates();
+}
+
+function updateExtensionStatusUI(ready, removed) {
+  if (ready) {
+    extensionStatusEl.innerHTML = `
+      <div class="status-badge green">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path></svg>
+        Extension Ready
+      </div>
+    `;
+  } else {
+    extensionStatusEl.innerHTML = `
+      <div class="status-badge red">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+        ${removed ? 'Extension Removed' : 'Extension Not Detected'}
+      </div>
+      <p class="ext-instruction">${removed
+        ? 'The extension was removed or disabled. Re-install it and reload this page.'
+        : 'Please install and enable the FlowAccess extension.'}</p>
+    `;
+  }
+}
+
+// === EXTENSION LIVENESS MONITOR ===
+// Uninstalling/disabling the extension gives it no shutdown hook —
+// Chrome runs zero extension code after removal, so cookies can't be
+// wiped and Flow tabs can't be closed at that point. The dashboard
+// therefore PINGs the extension every 10s; a true→false transition
+// means it was removed mid-session, and we immediately invalidate the
+// session server-side (timer stops, resume blocked until reinstall).
+function verifyExtensionAlive() {
+  return Promise.race([
+    requestFromExtension('PING', {}).then(res => !!(res && res.installed === true)),
+    new Promise(resolve => setTimeout(() => resolve(false), 2500))
+  ]);
+}
+
+async function monitorExtension() {
+  const alive = await verifyExtensionAlive();
+  if (alive === extensionAlive) return;
+  extensionAlive = alive;
+  if (alive) {
+    // Restored (rare on the same page — content scripts don't re-inject
+    // until reload — but handle it anyway)
+    extensionConfirmedOnce = true;
+    setExtensionReady();
+  } else if (extensionConfirmedOnce) {
+    onExtensionRemoved();
+  } else {
+    isExtensionReady = false;
+    updateExtensionStatusUI(false, false);
+    updateButtonStates();
+  }
+}
+
+async function onExtensionRemoved() {
+  isExtensionReady = false;
+  updateExtensionStatusUI(false, true);
+
+  // Invalidate any running session server-side. NOTE: WIPE_COOKIES /
+  // CLOSE_FLOW_TAB are impossible here — there is no extension left to
+  // receive them. The session is frozen as Paused so no further time
+  // accrues and Resume stays blocked until the extension is back.
+  if (currentSessionId && !isPaused) {
+    try {
+      isPaused = true;
+      if (timerInterval) clearInterval(timerInterval);
+      stopHeartbeat();
+      const sessionRef = doc(db, 'sessions', currentSessionId);
+      const sessionDoc = await getDoc(sessionRef);
+      let durationMs = 0;
+      if (sessionDoc.exists() && sessionDoc.data().startedAt) {
+        durationMs = Math.max(0, Date.now() - sessionDoc.data().startedAt.toDate().getTime());
+      }
+      await updateDoc(sessionRef, {
+        status: 'Paused',
+        durationMs: durationMs,
+        pausedAt: serverTimestamp(),
+        pausedReason: 'extension_removed'
+      });
+      console.log('[Dashboard] Session auto-paused: extension removed');
+    } catch(e) {
+      console.error('[Dashboard] Auto-pause on extension removal failed:', e);
+    }
+  }
+
+  updateButtonStates();
+  if (currentSessionId) showExtensionLostOverlay();
+  else showToast("⚠️ FlowAccess extension was removed or disabled.", "error");
+}
+
+let extLostOverlay = null;
+function showExtensionLostOverlay() {
+  if (extLostOverlay) { extLostOverlay.style.display = 'flex'; return; }
+  extLostOverlay = document.createElement('div');
+  extLostOverlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.72);backdrop-filter:blur(4px);';
+  extLostOverlay.innerHTML = `
+    <div style="background:#1f2937;color:#f9fafb;border:1px solid #374151;border-radius:16px;padding:32px 36px;max-width:430px;margin:16px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:inherit;">
+      <div style="font-size:44px;margin-bottom:12px;">🧩</div>
+      <h2 style="margin:0 0 10px;font-size:20px;">Extension Removed</h2>
+      <p style="margin:0 0 8px;color:#d1d5db;font-size:14px;line-height:1.6;">
+        The FlowAccess extension was removed or disabled, so your session has been
+        <b>paused</b> and the timer stopped.
+      </p>
+      <p style="margin:0 0 20px;color:#9ca3af;font-size:13px;line-height:1.6;">
+        Re-install / re-enable the extension, then reload this page and press Resume.
+      </p>
+      <button id="fa-ext-lost-reload" style="background:#3b82f6;color:#fff;border:none;border-radius:10px;padding:12px 28px;font-size:15px;font-weight:600;cursor:pointer;">↻ Reload Dashboard</button>
+    </div>`;
+  document.body.appendChild(extLostOverlay);
+  extLostOverlay.querySelector('#fa-ext-lost-reload').addEventListener('click', () => location.reload());
+}
+
+function hideExtensionLostOverlay() {
+  if (extLostOverlay) extLostOverlay.style.display = 'none';
 }
 
 // === LOAD ACTIVE ACCESS CONFIG ===
@@ -318,6 +436,19 @@ async function expireStaleSession(id, data, now) {
 
 // === BUTTON STATES ===
 function updateButtonStates() {
+  // Extension missing — nothing session-related can work, so never
+  // offer Start/Pause/Resume (this also covers "resume shown after
+  // the extension was removed").
+  if (!isExtensionReady) {
+    startFlowBtn.style.display = '';
+    pauseFlowBtn.style.display = 'none';
+    resumeFlowBtn.style.display = 'none';
+    startFlowBtn.disabled = true;
+    startFlowBtn.innerText = "⚠️ Extension Required";
+    startFlowBtn.style.background = '#6b7280';
+    return;
+  }
+
   startFlowBtn.style.display = '';
   pauseFlowBtn.style.display = 'none';
   resumeFlowBtn.style.display = 'none';
@@ -524,6 +655,19 @@ startFlowBtn.addEventListener('click', async () => {
       startFlowBtn.innerText = "▶ Access Flow";
       return;
     }
+
+    // 0. Verify the extension is really alive (the load-time beacon can't
+    //    detect a mid-session uninstall) — never create a session without it
+    startFlowBtn.innerText = "⏳ Verifying extension...";
+    const extAlive = await verifyExtensionAlive();
+    if (!extAlive) {
+      isExtensionReady = false;
+      extensionAlive = false;
+      updateExtensionStatusUI(false, true);
+      updateButtonStates();
+      showToast("❌ FlowAccess extension not detected. Install/enable it and reload this page.", "error");
+      return;
+    }
     
     // 1. Create session in Firestore
     const sessionRef = await addDoc(collection(db, 'sessions'), {
@@ -617,6 +761,19 @@ resumeFlowBtn.addEventListener('click', async () => {
       showToast("❌ No active access config.", "error");
       resumeFlowBtn.disabled = false;
       resumeFlowBtn.innerText = "▶ Resume Session";
+      return;
+    }
+
+    // 0. Never resume without a live extension — otherwise the cookie
+    //    inject goes nowhere but a session + timer would still start
+    resumeFlowBtn.innerText = "🔍 Verifying...";
+    const extAlive = await verifyExtensionAlive();
+    if (!extAlive) {
+      isExtensionReady = false;
+      extensionAlive = false;
+      updateExtensionStatusUI(false, true);
+      updateButtonStates();
+      showToast("❌ FlowAccess extension not detected. Install/enable it and reload this page.", "error");
       return;
     }
 
