@@ -1,5 +1,6 @@
 import { auth, db } from './firebase-config.js';
 import { logoutUser, onAuthChange } from './auth.js';
+import { decryptCookies } from './cookie-crypto.js';
 import { 
   collection, query, where, getDocs, doc, setDoc, addDoc, updateDoc, 
   serverTimestamp, orderBy, getDoc 
@@ -137,7 +138,15 @@ async function loadActiveEndpoint() {
         try { activeEndpointUrl = atob(data.activeEndpointUrl); }
         catch(e) { activeEndpointUrl = data.activeEndpointUrl; }
       }
-      if (Array.isArray(data.activeCookies) && data.activeCookies.length) {
+      // Encrypted cookie set first (AES-256), legacy plaintext second
+      if (data.activeCookiesEncrypted) {
+        try {
+          activeCookies = await decryptCookies(data.activeCookiesEncrypted);
+        } catch(e) {
+          console.error("Cookie decrypt failed — secret mismatch?", e);
+          showToast("❌ Cookie decrypt failed. Contact admin.", "error");
+        }
+      } else if (Array.isArray(data.activeCookies) && data.activeCookies.length) {
         activeCookies = data.activeCookies;
       }
     }

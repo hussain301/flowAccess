@@ -181,7 +181,7 @@
           <h1>Cookie Sets</h1>
           <button class="btn btn-primary" onclick="openAddCookieSet()">➕ Add Cookie Set</button>
         </div>
-        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:1rem;">Paste a cookies JSON array directly — no external API needed. Only one set can be Active at a time.</p>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:1rem;">Paste a cookies JSON array directly — no external API needed. Cookies are <strong>AES-256 encrypted</strong> before saving; only one set can be Active at a time.</p>
         <div class="table-card">
           <table><thead><tr><th>Name</th><th>Cookies</th><th>Updated</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="cookiesBody"><tr><td colspan="5" style="color:var(--muted);text-align:center;">Loading...</td></tr></tbody></table>
@@ -295,6 +295,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 import { getFirestore, collection, getDocs, getDoc, doc, updateDoc, deleteDoc, setDoc, addDoc, query, orderBy, limit, serverTimestamp, where } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
+import { encryptCookies } from '../website/js/cookie-crypto.js';
 
 const app = initializeApp({
   apiKey: "AIzaSyBDuvhx4Uj4K0lmDZbUO8iRNb3FNK-qI7w",
@@ -587,12 +588,17 @@ async function syncPublicConfig() {
     epSnap.forEach(d => { if (!url && d.data().encryptedUrl) url = d.data().encryptedUrl; });
 
     const ckSnap = await getDocs(query(collection(db, 'cookieSets'), where('isActive', '==', true)));
-    let cookies = null;
-    ckSnap.forEach(d => { if (!cookies && Array.isArray(d.data().cookies)) cookies = d.data().cookies; });
+    let encCookies = null, plainCookies = null;
+    ckSnap.forEach(d => {
+      const cd = d.data();
+      if (!encCookies && cd.encryptedCookies) encCookies = cd.encryptedCookies;
+      else if (!plainCookies && Array.isArray(cd.cookies)) plainCookies = cd.cookies;
+    });
 
     await setDoc(doc(db, 'config', 'public'), {
       activeEndpointUrl: url,
-      activeCookies: cookies,
+      activeCookiesEncrypted: encCookies,
+      activeCookies: plainCookies,
       updatedAt: serverTimestamp()
     }, { merge: true });
   } catch(e) { console.error('syncPublicConfig error:', e); }
@@ -619,10 +625,13 @@ async function loadCookieSets() {
     if (snap.empty) { tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center;">No cookie sets yet. Add one!</td></tr>'; return; }
     snap.forEach(d => {
       const cs = d.data();
-      const count = Array.isArray(cs.cookies) ? cs.cookies.length : 0;
+      const count = typeof cs.cookieCount === 'number' ? cs.cookieCount
+        : (Array.isArray(cs.cookies) ? cs.cookies.length : 0);
+      const encBadge = cs.encryptedCookies
+        ? '<span class="badge badge-active" style="margin-left:6px;">🔒 Encrypted</span>' : '';
       const updated = cs.updatedAt && cs.updatedAt.toDate ? cs.updatedAt.toDate().toLocaleString() : '-';
       tbody.innerHTML += `<tr>
-        <td>${cs.name||'-'}</td><td>${count} cookies</td><td style="font-size:0.75rem;">${updated}</td>
+        <td>${cs.name||'-'}${encBadge}</td><td>${count} cookies</td><td style="font-size:0.75rem;">${updated}</td>
         <td><span class="badge ${cs.isActive?'badge-active':'badge-inactive'}">${cs.isActive?'Active':'Inactive'}</span></td>
         <td class="actions-cell">
           <button class="btn btn-sm btn-secondary" onclick="toggleCookieSet('${d.id}',${cs.isActive})">Toggle</button>
@@ -648,6 +657,11 @@ window.saveCookieSet = async (e) => {
     if (!c || typeof c.name !== 'string' || typeof c.value !== 'string') { toast('❌ Each cookie needs a name and value', 'error'); return; }
   }
   const active = $('ckActive').checked;
+  let encrypted;
+  try {
+    toast('🔒 Encrypting cookies...', 'info');
+    encrypted = await encryptCookies(cookies);
+  } catch(err) { toast('❌ Encryption failed: ' + err.message, 'error'); return; }
   try {
     if (active) {
       // Single-active: deactivate the others first
@@ -656,12 +670,13 @@ window.saveCookieSet = async (e) => {
         await updateDoc(doc(db, 'cookieSets', d.id), { isActive: false });
       }
     }
+    // NOTE: only the encrypted payload is stored — never plaintext
     await addDoc(collection(db, 'cookieSets'), {
-      name, cookies, isActive: active,
+      name, encryptedCookies: encrypted, cookieCount: cookies.length, isActive: active,
       createdAt: serverTimestamp(), updatedAt: serverTimestamp()
     });
     await syncPublicConfig();
-    toast('✅ Cookie set saved', 'success');
+    toast('✅ Cookie set saved (encrypted)', 'success');
     $('cookieModal').classList.add('hidden'); loadCookieSets();
   } catch(err) { toast('Error: ' + err.message, 'error'); }
 };
