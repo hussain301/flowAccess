@@ -51,6 +51,7 @@
                     if (!fakeEmoji) fakeEmoji = FAKE_EMOJIS[Math.floor(Math.random() * FAKE_EMOJIS.length)];
                     chrome.storage.local.set({ faFakeEmail: fakeEmail, faFakeEmoji: fakeEmoji });
                 }
+                try { scheduleIdentitySweep(); } catch (e) {}
             }
         );
     }
@@ -337,6 +338,37 @@
             }
         });
     }
+
+    // Instant identity enforcement: the account menu popup is inserted
+    // into the DOM the moment the profile is clicked. Polling every 2s
+    // lets the real account flash first — so watch for new nodes and
+    // sweep inside the same frame (MutationObserver callbacks run as
+    // microtasks, before the browser paints the popup).
+    let identityScheduled = false;
+    function scheduleIdentitySweep() {
+        if (identityScheduled) return;
+        identityScheduled = true;
+        requestAnimationFrame(() => {
+            identityScheduled = false;
+            try { applyFakeIdentity(); } catch (e) {}
+        });
+    }
+    try {
+        const identityObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.type === 'childList' && m.addedNodes.length) { scheduleIdentitySweep(); break; }
+                if (m.type === 'attributes') { scheduleIdentitySweep(); break; }
+            }
+        });
+        if (document.documentElement) {
+            identityObserver.observe(document.documentElement, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['src']
+            });
+        }
+    } catch (e) {}
 
     // ============================
     // 4. SAVE PROJECT BUTTON (max 3)
