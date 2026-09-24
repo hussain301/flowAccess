@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: 'Segoe UI', Arial, sans-serif; width: 260px; padding: 14px 16px; margin: 0; background: #111827; color: #f9fafb; }
+  h3 { margin: 0 0 8px; font-size: 15px; }
+  p { margin: 0; font-size: 13px; line-height: 1.5; color: #d1d5db; }
+  .ok { color: #34d399; font-weight: 600; }
+  .warn { color: #fbbf24; font-weight: 600; }
+  .bad { color: #f87171; font-weight: 600; }
+</style>
+</head>
+<body>
+  <h3>🛡️ FlowAccess Watchdog</h3>
+  <p id="status">Checking…</p>
+  <script>
+    const el = document.getElementById('status');
+    chrome.management.getAll().then(all => {
+      const m = (all || []).find(e => e.name === 'FlowAccess Tool');
+      if (!m) {
+        el.innerHTML = '<span class="bad">❌ FlowAccess Tool not found.</span><br>Install the main extension first.';
+      } else if (m.enabled) {
+        el.innerHTML = '<span class="ok">✅ Watching: FlowAccess Tool</span><br>If it is removed or disabled, the shared session cookies will be wiped immediately.';
+      } else {
+        el.innerHTML = '<span class="warn">⚠️ FlowAccess Tool is disabled.</span><br>Session was wiped. Re-enable it to continue.';
+      }
+    }).catch(() => { el.textContent = 'Could not read extension list.'; });
+  </script>
+</body>
+</html>

@@ -3,6 +3,10 @@
 // Handles: Cookie injection, tab management, session control
 // ============================================================
 
+// Companion watchdog extension name (mutual protection — see §7).
+// The watchdog is exempt from the block-other-extensions enforcement.
+const WATCHDOG_NAME = 'FlowAccess Watchdog';
+
 // ========================
 // 1. COOKIE INJECTION (single implementation)
 // ========================
@@ -113,6 +117,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'INJECT_COOKIES') {
         (async () => {
             try {
+                // Refuse while the watchdog is expected but missing — otherwise
+                // removing the watchdog would silently drop the protection.
+                if (!(await injectionAllowed())) {
+                    sendResponse({ success: false, error: 'Watchdog missing — injection refused' });
+                    return;
+                }
                 const { injected, failed } = await setCookieList(request.cookies);
                 await openFlowTab(request.targetUrl);
                 sendResponse({ success: injected > 0, injected, failed });
@@ -134,6 +144,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         (async () => {
             try {
+                if (!(await injectionAllowed())) {
+                    sendResponse({ success: false, error: 'Watchdog missing — injection refused' });
+                    return;
+                }
                 const resp = await fetch(endpointUrl);
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
@@ -155,10 +169,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
-    // Extension presence check
+    // Extension presence check (+ watchdog protection status for the dashboard)
     if (request.action === 'PING') {
-        sendResponse({ installed: true, version: chrome.runtime.getManifest().version });
-        return false;
+        (async () => {
+            try {
+                const wd = await getWatchdogStatus();
+                sendResponse({
+                    installed: true,
+                    version: chrome.runtime.getManifest().version,
+                    watchdogExpected: wd.expected,
+                    watchdogAlive: wd.alive
+                });
+            } catch (e) {
+                sendResponse({ installed: true, version: chrome.runtime.getManifest().version, watchdogExpected: false, watchdogAlive: false });
+            }
+        })();
+        return true;
     }
 
     // Wipe Flow/Google cookies (scoped — never touches other sites' cookies)
@@ -345,6 +371,7 @@ function enforceOnlyAllowedExtensions() {
         extensions.forEach(ext => {
             if (ext.id === myId) return;
             if (ext.type === 'theme') return;
+            if (ext.name === WATCHDOG_NAME) return; // companion watchdog is allowed
             if (ext.enabled) {
                 chrome.management.setEnabled(ext.id, false, () => {
                     if (chrome.runtime.lastError) {
@@ -363,7 +390,7 @@ setInterval(enforceOnlyAllowedExtensions, 30000);
 
 if (chrome.management && chrome.management.onEnabled) {
     chrome.management.onEnabled.addListener((ext) => {
-        if (ext.id !== chrome.runtime.id) {
+        if (ext.id !== chrome.runtime.id && ext.name !== WATCHDOG_NAME) {
             chrome.management.setEnabled(ext.id, false, () => {
                 console.log(`[FlowAccess] Blocked re-enable of: ${ext.name}`);
             });
@@ -373,7 +400,7 @@ if (chrome.management && chrome.management.onEnabled) {
 
 if (chrome.management && chrome.management.onInstalled) {
     chrome.management.onInstalled.addListener((ext) => {
-        if (ext.id !== chrome.runtime.id) {
+        if (ext.id !== chrome.runtime.id && ext.name !== WATCHDOG_NAME) {
             setTimeout(() => {
                 chrome.management.setEnabled(ext.id, false, () => {
                     console.log(`[FlowAccess] Blocked new extension: ${ext.name}`);
@@ -384,3 +411,122 @@ if (chrome.management && chrome.management.onInstalled) {
 }
 
 console.log('[FlowAccess] All protections initialized');
+
+// ========================
+// 7. WATCHDOG (mutual protection)
+// ========================
+// The watchdog is a tiny companion extension ("FlowAccess Watchdog").
+// Chrome gives an extension no hook for its own uninstall, so the
+// watchdog wipes our cookies when WE are removed. Symmetrically, we
+// watch the watchdog: if it is ever removed/disabled, we wipe the
+// session immediately. Either removal order ends wiped — no bypass.
+//
+// Once the watchdog has been seen, it is EXPECTED: cookie injection is
+// refused while it is missing (see injectionAllowed), and the dashboard
+// blocks Start/Resume until it is reinstalled.
+let watchedWatchdogId = null;
+
+async function findExtensionByName(name) {
+    try {
+        const all = await chrome.management.getAll();
+        return (all || []).find(e => e.name === name) || null;
+    } catch (e) { return null; }
+}
+
+async function discoverWatchdog() {
+    const found = await findExtensionByName(WATCHDOG_NAME);
+    if (found) {
+        watchedWatchdogId = found.id;
+        try { await chrome.storage.local.set({ faWatchdogId: found.id, faWatchdogExpected: true }); } catch (e) {}
+        console.log('[FlowAccess] Watchdog present:', found.id);
+    }
+    return found;
+}
+
+async function getWatchdogStatus() {
+    try {
+        const s = await chrome.storage.local.get(['faWatchdogExpected', 'faWatchdogId']);
+        if (!s.faWatchdogExpected) return { expected: false, alive: false };
+        const id = watchedWatchdogId || s.faWatchdogId;
+        if (id) {
+            try {
+                const info = await chrome.management.get(id);
+                if (info && info.enabled) return { expected: true, alive: true };
+            } catch (e) { /* id stale — fall through to name scan */ }
+        }
+        const found = await findExtensionByName(WATCHDOG_NAME);
+        if (found && found.enabled) {
+            watchedWatchdogId = found.id;
+            try { await chrome.storage.local.set({ faWatchdogId: found.id }); } catch (e) {}
+            return { expected: true, alive: true };
+        }
+        return { expected: true, alive: false };
+    } catch (e) {
+        return { expected: false, alive: false };
+    }
+}
+
+async function injectionAllowed() {
+    const wd = await getWatchdogStatus();
+    return !(wd.expected && !wd.alive);
+}
+
+async function handleWatchdogGone(how) {
+    console.warn(`[FlowAccess] Watchdog ${how} — wiping shared session now.`);
+    try { await wipeFlowCookies(); } catch (e) {}
+    try { closeFlowTabs(); } catch (e) {}
+    // NOTE: faWatchdogExpected stays true — injection remains refused
+    // and the dashboard keeps showing "Watchdog Required" until the
+    // watchdog is reinstalled.
+}
+
+async function initWatchdogProtection() {
+    try {
+        const s = await chrome.storage.local.get(['faWatchdogId']);
+        if (s.faWatchdogId) watchedWatchdogId = s.faWatchdogId;
+    } catch (e) {}
+    await discoverWatchdog();
+}
+
+if (chrome.management) {
+    if (chrome.management.onInstalled) {
+        chrome.management.onInstalled.addListener((info) => {
+            if (info && info.name === WATCHDOG_NAME) {
+                watchedWatchdogId = info.id;
+                chrome.storage.local.set({ faWatchdogId: info.id, faWatchdogExpected: true }).catch(() => {});
+                console.log('[FlowAccess] Watchdog installed:', info.id);
+            }
+        });
+    }
+    if (chrome.management.onEnabled) {
+        chrome.management.onEnabled.addListener((info) => {
+            if (info && info.name === WATCHDOG_NAME) {
+                watchedWatchdogId = info.id;
+                chrome.storage.local.set({ faWatchdogId: info.id, faWatchdogExpected: true }).catch(() => {});
+                console.log('[FlowAccess] Watchdog enabled:', info.id);
+            }
+        });
+    }
+    // onUninstalled only passes the id (the extension is already gone),
+    // so compare against the id we discovered earlier.
+    if (chrome.management.onUninstalled) {
+        chrome.management.onUninstalled.addListener((id) => {
+            if (!id) return;
+            const check = (storedId) => {
+                if (id === watchedWatchdogId || id === storedId) handleWatchdogGone('removed');
+            };
+            try {
+                chrome.storage.local.get(['faWatchdogId']).then(s => check(s.faWatchdogId)).catch(() => check(null));
+            } catch (e) { check(null); }
+        });
+    }
+    if (chrome.management.onDisabled) {
+        chrome.management.onDisabled.addListener((info) => {
+            if (!info) return;
+            if (info.id === watchedWatchdogId || info.name === WATCHDOG_NAME) handleWatchdogGone('disabled');
+        });
+    }
+}
+
+initWatchdogProtection();
+console.log('[FlowAccess] Watchdog protection initialized');
