@@ -35,6 +35,11 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // Cookie sets — admin only (published copy goes to config/public)
+    match /cookieSets/{setId} {
+      allow read, write: if isAdmin();
+    }
+
     // Config — admin only, except the published public doc which
     // signed-in users may read (active endpoint for the dashboard)
     match /config/public {

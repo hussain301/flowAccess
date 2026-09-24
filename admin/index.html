@@ -123,6 +123,7 @@
         <button class="nav-item active" onclick="showView('dashboard')">📊 Dashboard</button>
         <button class="nav-item" onclick="showView('users')">👥 Users</button>
         <button class="nav-item" onclick="showView('endpoints')">🔗 Endpoints</button>
+        <button class="nav-item" onclick="showView('cookies')">🍪 Cookie Sets</button>
         <button class="nav-item" onclick="showView('sessions')">⏱️ Sessions</button>
       </nav>
       <div class="sidebar-footer">
@@ -171,6 +172,19 @@
         <div class="table-card">
           <table><thead><tr><th>Name</th><th>URL (encrypted)</th><th>Status</th><th>Actions</th></tr></thead>
           <tbody id="endpointsBody"><tr><td colspan="4" style="color:var(--muted);text-align:center;">Loading...</td></tr></tbody></table>
+        </div>
+      </div>
+
+      <!-- COOKIE SETS -->
+      <div id="view-cookies" class="hidden">
+        <div class="view-header">
+          <h1>Cookie Sets</h1>
+          <button class="btn btn-primary" onclick="openAddCookieSet()">➕ Add Cookie Set</button>
+        </div>
+        <p style="color:var(--muted);font-size:0.85rem;margin-bottom:1rem;">Paste a cookies JSON array directly — no external API needed. Only one set can be Active at a time.</p>
+        <div class="table-card">
+          <table><thead><tr><th>Name</th><th>Cookies</th><th>Updated</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="cookiesBody"><tr><td colspan="5" style="color:var(--muted);text-align:center;">Loading...</td></tr></tbody></table>
         </div>
       </div>
 
@@ -240,6 +254,26 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-secondary" onclick="document.getElementById('endpointModal').classList.add('hidden')">Cancel</button>
           <button type="submit" class="btn btn-primary">Save Endpoint</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- COOKIE SET MODAL -->
+  <div id="cookieModal" class="modal hidden">
+    <div class="modal-content" style="max-width:640px;">
+      <h3 id="cookieModalTitle">Add Cookie Set</h3>
+      <form onsubmit="saveCookieSet(event)">
+        <div class="form-group"><label>Name</label><input type="text" id="ckName" required placeholder="Account 1"></div>
+        <div class="form-group">
+          <label>Cookies JSON (array)</label>
+          <textarea id="ckJson" required rows="10" style="width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(255,255,255,0.04);color:var(--text);font-family:monospace;font-size:0.75rem;" placeholder='[{"domain":".google.com","name":"SID","value":"...","path":"/","secure":true,"httpOnly":false}, ...]'></textarea>
+          <small>Paste the exported cookies array. Max 500 cookies.</small>
+        </div>
+        <div class="form-group"><label><input type="checkbox" id="ckActive" checked> Active</label></div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-secondary" onclick="document.getElementById('cookieModal').classList.add('hidden')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Cookie Set</button>
         </div>
       </form>
     </div>
@@ -320,6 +354,7 @@ onAuthStateChanged(auth, async (user) => {
       loadDashboard();
       loadUsers();
       loadEndpoints();
+      loadCookieSets();
       loadSessions();
     } else {
       await signOut(auth);
@@ -537,37 +572,118 @@ window.saveEndpoint = async (e) => {
     const id = $('epId').value;
     if (id) { await updateDoc(doc(db, 'endpoints', id), data); }
     else { data.createdAt = serverTimestamp(); await addDoc(collection(db, 'endpoints'), data); }
-    await syncPublicEndpoint();
+    await syncPublicConfig();
     toast('✅ Endpoint saved', 'success');
     $('endpointModal').classList.add('hidden'); loadEndpoints();
   } catch(err) { toast('Error: '+err.message, 'error'); }
 };
 
-// Publish the active endpoint to config/public so signed-in users'
-// dashboards can read it (endpoints collection stays admin-only).
-async function syncPublicEndpoint() {
+// Publish the active endpoint + active cookie set to config/public so
+// signed-in users' dashboards can read them (raw collections stay admin-only).
+async function syncPublicConfig() {
   try {
-    const snap = await getDocs(query(collection(db, 'endpoints'), where('isActive', '==', true)));
+    const epSnap = await getDocs(query(collection(db, 'endpoints'), where('isActive', '==', true)));
     let url = null;
-    snap.forEach(d => { if (!url && d.data().encryptedUrl) url = d.data().encryptedUrl; });
-    if (url) {
-      await setDoc(doc(db, 'config', 'public'), { activeEndpointUrl: url, updatedAt: serverTimestamp() });
-    } else {
-      await setDoc(doc(db, 'config', 'public'), { activeEndpointUrl: null, updatedAt: serverTimestamp() });
-    }
-  } catch(e) { console.error('syncPublicEndpoint error:', e); }
+    epSnap.forEach(d => { if (!url && d.data().encryptedUrl) url = d.data().encryptedUrl; });
+
+    const ckSnap = await getDocs(query(collection(db, 'cookieSets'), where('isActive', '==', true)));
+    let cookies = null;
+    ckSnap.forEach(d => { if (!cookies && Array.isArray(d.data().cookies)) cookies = d.data().cookies; });
+
+    await setDoc(doc(db, 'config', 'public'), {
+      activeEndpointUrl: url,
+      activeCookies: cookies,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  } catch(e) { console.error('syncPublicConfig error:', e); }
 }
 
 window.toggleEp = async (id, cur) => {
   await updateDoc(doc(db, 'endpoints', id), { isActive: !cur, updatedAt: serverTimestamp() });
-  await syncPublicEndpoint();
+  await syncPublicConfig();
   toast('✅ Toggled', 'success'); loadEndpoints();
 };
 window.deleteEp = async (id) => {
   if (!confirm('Delete this endpoint?')) return;
   await deleteDoc(doc(db, 'endpoints', id));
-  await syncPublicEndpoint();
+  await syncPublicConfig();
   toast('✅ Deleted', 'success'); loadEndpoints();
+};
+
+// --- Cookie Sets ---
+async function loadCookieSets() {
+  try {
+    const snap = await getDocs(collection(db, 'cookieSets'));
+    const tbody = $('cookiesBody');
+    tbody.innerHTML = '';
+    if (snap.empty) { tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);text-align:center;">No cookie sets yet. Add one!</td></tr>'; return; }
+    snap.forEach(d => {
+      const cs = d.data();
+      const count = Array.isArray(cs.cookies) ? cs.cookies.length : 0;
+      const updated = cs.updatedAt && cs.updatedAt.toDate ? cs.updatedAt.toDate().toLocaleString() : '-';
+      tbody.innerHTML += `<tr>
+        <td>${cs.name||'-'}</td><td>${count} cookies</td><td style="font-size:0.75rem;">${updated}</td>
+        <td><span class="badge ${cs.isActive?'badge-active':'badge-inactive'}">${cs.isActive?'Active':'Inactive'}</span></td>
+        <td class="actions-cell">
+          <button class="btn btn-sm btn-secondary" onclick="toggleCookieSet('${d.id}',${cs.isActive})">Toggle</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteCookieSet('${d.id}')">Delete</button>
+        </td></tr>`;
+    });
+  } catch(e) { console.error('Cookie sets error:', e); }
+}
+window.loadCookieSets = loadCookieSets;
+
+window.openAddCookieSet = () => { $('ckName').value=''; $('ckJson').value=''; $('ckActive').checked=true; $('cookieModalTitle').textContent='Add Cookie Set'; $('cookieModal').classList.remove('hidden'); };
+
+window.saveCookieSet = async (e) => {
+  e.preventDefault();
+  const name = $('ckName').value.trim();
+  let cookies;
+  try {
+    cookies = JSON.parse($('ckJson').value);
+  } catch(err) { toast('❌ Invalid JSON: ' + err.message, 'error'); return; }
+  if (!Array.isArray(cookies) || cookies.length === 0) { toast('❌ JSON must be a non-empty array of cookies', 'error'); return; }
+  if (cookies.length > 500) { toast('❌ Too many cookies (max 500)', 'error'); return; }
+  for (const c of cookies) {
+    if (!c || typeof c.name !== 'string' || typeof c.value !== 'string') { toast('❌ Each cookie needs a name and value', 'error'); return; }
+  }
+  const active = $('ckActive').checked;
+  try {
+    if (active) {
+      // Single-active: deactivate the others first
+      const snap = await getDocs(query(collection(db, 'cookieSets'), where('isActive', '==', true)));
+      for (const d of snap.docs) {
+        await updateDoc(doc(db, 'cookieSets', d.id), { isActive: false });
+      }
+    }
+    await addDoc(collection(db, 'cookieSets'), {
+      name, cookies, isActive: active,
+      createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+    });
+    await syncPublicConfig();
+    toast('✅ Cookie set saved', 'success');
+    $('cookieModal').classList.add('hidden'); loadCookieSets();
+  } catch(err) { toast('Error: ' + err.message, 'error'); }
+};
+
+window.toggleCookieSet = async (id, cur) => {
+  // Single-active: turning one on turns the others off
+  if (!cur) {
+    const snap = await getDocs(query(collection(db, 'cookieSets'), where('isActive', '==', true)));
+    for (const d of snap.docs) {
+      if (d.id !== id) await updateDoc(doc(db, 'cookieSets', d.id), { isActive: false });
+    }
+  }
+  await updateDoc(doc(db, 'cookieSets', id), { isActive: !cur, updatedAt: serverTimestamp() });
+  await syncPublicConfig();
+  toast('✅ Toggled', 'success'); loadCookieSets();
+};
+
+window.deleteCookieSet = async (id) => {
+  if (!confirm('Delete this cookie set?')) return;
+  await deleteDoc(doc(db, 'cookieSets', id));
+  await syncPublicConfig();
+  toast('✅ Deleted', 'success'); loadCookieSets();
 };
 
 // --- Sessions ---

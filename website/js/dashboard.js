@@ -15,6 +15,7 @@ let timerInterval = null;
 let isExtensionReady = false;
 let isPaused = false;
 let activeEndpointUrl = null;
+let activeCookies = null; // direct cookie set from Firebase (preferred over endpoint)
 
 // === DOM ELEMENTS ===
 const userEmailEl = document.getElementById('userEmail');
@@ -123,9 +124,10 @@ function setExtensionReady() {
   updateButtonStates();
 }
 
-// === LOAD ACTIVE ENDPOINT ===
-// Reads the published endpoint from config/public (readable by all
-// signed-in users). The raw endpoints collection stays admin-only.
+// === LOAD ACTIVE ACCESS CONFIG ===
+// Reads the published access config from config/public (readable by all
+// signed-in users). Prefers a directly-stored cookie set; falls back to
+// the external endpoint URL. Raw collections stay admin-only.
 async function loadActiveEndpoint() {
   try {
     const pubDoc = await getDoc(doc(db, 'config', 'public'));
@@ -135,11 +137,34 @@ async function loadActiveEndpoint() {
         try { activeEndpointUrl = atob(data.activeEndpointUrl); }
         catch(e) { activeEndpointUrl = data.activeEndpointUrl; }
       }
+      if (Array.isArray(data.activeCookies) && data.activeCookies.length) {
+        activeCookies = data.activeCookies;
+      }
     }
-    console.log('[Dashboard] Endpoint loaded:', activeEndpointUrl ? 'YES' : 'NONE');
+    console.log('[Dashboard] Access config loaded:',
+      activeCookies ? `cookies (${activeCookies.length})` : (activeEndpointUrl ? 'endpoint' : 'NONE'));
   } catch(e) {
-    console.error("Error loading endpoint:", e);
+    console.error("Error loading access config:", e);
   }
+}
+
+// Inject Flow access: direct Firebase cookies first, endpoint fetch second.
+function injectAccessCookies() {
+  if (activeCookies && activeCookies.length) {
+    sendToExtension('INJECT_COOKIES', {
+      cookies: activeCookies,
+      sessionId: currentSessionId
+    });
+    return true;
+  }
+  if (activeEndpointUrl) {
+    sendToExtension('FETCH_AND_INJECT', {
+      endpointUrl: activeEndpointUrl,
+      sessionId: currentSessionId
+    });
+    return true;
+  }
+  return false;
 }
 
 // === LOAD USAGE DATA ===
@@ -395,8 +420,9 @@ startFlowBtn.addEventListener('click', async () => {
   try {
     startFlowBtn.disabled = true;
     startFlowBtn.innerText = "⏳ Connecting...";
-    
-    if (!activeEndpointUrl) {
+
+    const hasAccess = (activeCookies && activeCookies.length) || activeEndpointUrl;
+    if (!hasAccess) {
       showToast("❌ Service unavailable. Contact admin.", "error");
       startFlowBtn.disabled = false;
       startFlowBtn.innerText = "▶ Access Flow";
@@ -420,10 +446,7 @@ startFlowBtn.addEventListener('click', async () => {
     isPaused = false;
     
     // 2. Tell extension to setup access and open Flow (all behind the scenes)
-    sendToExtension('FETCH_AND_INJECT', {
-      endpointUrl: activeEndpointUrl,
-      sessionId: currentSessionId
-    });
+    injectAccessCookies();
     
     // 3. Start countdown timer + heartbeat
     showToast("✅ Session started! Opening Flow...", "success");
@@ -492,19 +515,17 @@ resumeFlowBtn.addEventListener('click', async () => {
   try {
     resumeFlowBtn.disabled = true;
     resumeFlowBtn.innerText = "🔄 Resuming...";
-    
-    if (!activeEndpointUrl) {
-      showToast("❌ No active endpoint.", "error");
+
+    const hasAccess = (activeCookies && activeCookies.length) || activeEndpointUrl;
+    if (!hasAccess) {
+      showToast("❌ No active access config.", "error");
       resumeFlowBtn.disabled = false;
       resumeFlowBtn.innerText = "▶ Resume Session";
       return;
     }
-    
+
     // 1. Re-inject cookies and open Flow
-    sendToExtension('FETCH_AND_INJECT', {
-      endpointUrl: activeEndpointUrl,
-      sessionId: currentSessionId
-    });
+    injectAccessCookies();
     
     // 2. Create new session (old one was paused with duration saved)
     const sessionRef = await addDoc(collection(db, 'sessions'), {
