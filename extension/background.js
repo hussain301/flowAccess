@@ -76,35 +76,20 @@ function parseEndpointCookies(data) {
     throw new Error('Unknown cookie format in response');
 }
 
-async function getActiveTabId() {
-    return new Promise((resolve) => {
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            resolve(tabs && tabs.length > 0 ? tabs[0].id : null);
-        });
-    });
-}
-
-async function openFlowTab(targetUrl, tabId) {
+// Open Flow in a NEW tab (dashboard tab is left untouched).
+// If a Flow tab already exists, focus it instead of opening another.
+async function openFlowTab(targetUrl) {
     const finalUrl = targetUrl || 'https://flow.google.com/?pli=1';
-    const activeTabId = tabId || await getActiveTabId();
 
-    if (activeTabId) {
-        try {
-            await chrome.scripting.executeScript({
-                target: { tabId: activeTabId },
-                func: () => {
-                    try { sessionStorage.setItem('FLOW_ACCESS_SESSION', 'true'); } catch (e) {}
-                }
-            });
-        } catch (e) { /* tab may not allow scripting */ }
-
-        chrome.tabs.update(activeTabId, { url: finalUrl, active: true }, () => {
-            setTimeout(() => {
-                chrome.tabs.reload(activeTabId, { bypassCache: true }).catch(() => {});
-            }, 600);
-        });
-        return activeTabId;
-    }
+    try {
+        const existing = await chrome.tabs.query({ url: '*://flow.google.com/*' });
+        if (existing && existing.length > 0) {
+            const tab = existing[0];
+            await chrome.tabs.update(tab.id, { active: true });
+            try { await chrome.windows.update(tab.windowId, { focused: true }); } catch (e) {}
+            return tab.id;
+        }
+    } catch (e) { /* fall through to create */ }
 
     const tab = await chrome.tabs.create({ url: finalUrl, active: true });
     setTimeout(() => {
@@ -129,7 +114,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (async () => {
             try {
                 const { injected, failed } = await setCookieList(request.cookies);
-                await openFlowTab(request.targetUrl, sender && sender.tab ? sender.tab.id : null);
+                await openFlowTab(request.targetUrl);
                 sendResponse({ success: injected > 0, injected, failed });
             } catch (err) {
                 sendResponse({ success: false, error: err.message });
@@ -158,7 +143,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 const { injected, failed } = await setCookieList(cookies);
 
-                await openFlowTab(data.url || 'https://flow.google.com/?pli=1', null);
+                await openFlowTab(data.url || 'https://flow.google.com/?pli=1');
 
                 sendResponse({ success: true, injected, failed, total: cookies.length });
             } catch (err) {

@@ -38,7 +38,9 @@
         'FETCH_AND_INJECT',
         'WIPE_COOKIES',
         'CLOSE_FLOW_TAB',
-        'STOP_FLOW'
+        'STOP_FLOW',
+        'GET_SAVED_PROJECTS',
+        'REMOVE_SAVED_PROJECT'
     ]);
 
     const DEFAULT_ORIGINS = ['http://localhost:5500'];
@@ -113,7 +115,31 @@
 
             const { action, payload } = event.data;
 
-            // 2. Action allowlist + payload schema validation
+            // 2a. Local storage actions — handled here, never forwarded
+            if (action === 'GET_SAVED_PROJECTS') {
+                chrome.storage.local.get(['faSavedProjects'], (r) => {
+                    const list = Array.isArray(r.faSavedProjects) ? r.faSavedProjects : [];
+                    reply({ success: true, projects: list });
+                });
+                return;
+            }
+            if (action === 'REMOVE_SAVED_PROJECT') {
+                const url = payload && payload.url;
+                if (typeof url !== 'string' || !/^https:\/\/flow\.google\.com\/project\//i.test(url)) {
+                    reply({ success: false, error: 'Invalid project url' });
+                    return;
+                }
+                chrome.storage.local.get(['faSavedProjects'], (r) => {
+                    const list = Array.isArray(r.faSavedProjects) ? r.faSavedProjects : [];
+                    const next = list.filter(p => p !== url);
+                    chrome.storage.local.set({ faSavedProjects: next }, () => {
+                        reply({ success: true, projects: next });
+                    });
+                });
+                return;
+            }
+
+            // 2b. Action allowlist + payload schema validation
             const err = validateBridgeMessage(action, payload || {});
             if (err) {
                 reply({ success: false, error: err });

@@ -9,6 +9,28 @@
   <title>Dashboard - FlowAccess</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./css/styles.css">
+  <style>
+    .saved-project-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.6rem 0.75rem;
+      margin-bottom: 0.5rem;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+    }
+    .saved-project-id {
+      flex: 1;
+      font-family: monospace;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .btn-sm { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+  </style>
 </head>
 <body>
   <div class="bg-animation">
@@ -57,6 +79,14 @@
           <button id="resumeFlowBtn" class="btn" style="width: 100%; padding: 1rem; margin-top: 0.5rem; background: #10b981; color: #fff; display: none; font-weight: 700;">
             ▶ Resume
           </button>
+        </div>
+
+        <div class="glass-card dash-card">
+          <h2>My Projects <span id="savedProjectsCount" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 400;">0/3</span></h2>
+          <div id="savedProjectsList">
+            <p style="color: var(--text-muted); font-size: 0.875rem;">Loading...</p>
+          </div>
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.75rem;">💡 Inside Flow, hit <strong>💾 Save Project</strong> — up to 3 projects will appear here.</p>
         </div>
       </div>
 

@@ -69,10 +69,13 @@ onAuthChange(async (user) => {
   
   // Load active endpoint from Firestore
   await loadActiveEndpoint();
-  
+
   // Check extension
   checkExtension();
-  
+
+  // Saved projects (from extension storage)
+  loadSavedProjects();
+
   // Load usage data & adjust timer
   await loadUsageData();
 });
@@ -409,18 +412,102 @@ function sendToExtension(action, payload) {
   }, window.location.origin);
 }
 
+// Request/response variant: resolves with the extension's reply payload.
+const pendingExtensionRequests = {};
+function requestFromExtension(action, payload) {
+  return new Promise((resolve) => {
+    const id = action + '-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+    pendingExtensionRequests[id] = resolve;
+    window.postMessage({
+      source: 'FLOW_ACCESS_WEB',
+      id: id,
+      action: action,
+      payload: payload || {}
+    }, window.location.origin);
+    setTimeout(() => {
+      if (pendingExtensionRequests[id]) {
+        delete pendingExtensionRequests[id];
+        resolve({ success: false, error: 'Extension not responding' });
+      }
+    }, 8000);
+  });
+}
+
 // Listen for extension replies
 window.addEventListener('message', (event) => {
   if (event.source !== window || !event.data) return;
   if (event.data.source !== 'FLOW_ACCESS_EXTENSION_REPLY') return;
-  
-  const { payload } = event.data;
+
+  const { id, payload } = event.data;
+  if (id && pendingExtensionRequests[id]) {
+    pendingExtensionRequests[id](payload);
+    delete pendingExtensionRequests[id];
+    return;
+  }
+
   if (payload && payload.success) {
     console.log('[Dashboard] Extension response:', payload);
   } else if (payload && payload.error) {
     console.warn('[Dashboard] Extension error:', payload.error);
   }
 });
+
+// === SAVED PROJECTS (max 3, stored by the extension) ===
+const savedProjectsListEl = document.getElementById('savedProjectsList');
+const savedProjectsCountEl = document.getElementById('savedProjectsCount');
+
+async function loadSavedProjects() {
+  const res = await requestFromExtension('GET_SAVED_PROJECTS', {});
+  if (res && res.success && Array.isArray(res.projects)) {
+    renderSavedProjects(res.projects);
+  } else {
+    savedProjectsCountEl.textContent = '0/3';
+    savedProjectsListEl.innerHTML =
+      '<p style="color: var(--text-muted); font-size: 0.875rem;">Install the FlowAccess extension to save projects.</p>';
+  }
+}
+
+function renderSavedProjects(projects) {
+  savedProjectsCountEl.textContent = projects.length + '/3';
+  if (!projects.length) {
+    savedProjectsListEl.innerHTML =
+      '<p style="color: var(--text-muted); font-size: 0.875rem;">No saved projects yet.</p>';
+    return;
+  }
+  savedProjectsListEl.innerHTML = '';
+  projects.forEach((url) => {
+    const m = url.match(/\/project\/([a-zA-Z0-9_\-]+)/);
+    const label = m ? m[1] : url;
+    const row = document.createElement('div');
+    row.className = 'saved-project-row';
+
+    const nameEl = document.createElement('span');
+    nameEl.className = 'saved-project-id';
+    nameEl.title = url;
+    nameEl.textContent = label.length > 14 ? label.slice(0, 14) + '…' : label;
+
+    const openBtn = document.createElement('button');
+    openBtn.className = 'btn btn-primary btn-sm';
+    openBtn.textContent = 'Open';
+    openBtn.addEventListener('click', () => window.open(url, '_blank', 'noopener'));
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'btn btn-sm';
+    delBtn.textContent = '✕';
+    delBtn.style.cssText = 'background: transparent; border: 1px solid var(--glass-border); color: #f87171;';
+    delBtn.title = 'Remove';
+    delBtn.addEventListener('click', async () => {
+      const res = await requestFromExtension('REMOVE_SAVED_PROJECT', { url });
+      if (res && res.success) renderSavedProjects(res.projects || []);
+      else showToast('❌ Could not remove project', 'error');
+    });
+
+    row.appendChild(nameEl);
+    row.appendChild(openBtn);
+    row.appendChild(delBtn);
+    savedProjectsListEl.appendChild(row);
+  });
+}
 
 // ========================================
 // START SESSION
