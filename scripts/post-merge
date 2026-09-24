@@ -1,0 +1,31 @@
+#!/bin/sh
+# ============================================================
+# FlowAccess — auto-restart local server after `git pull`
+# Git ka post-merge hook: pull me naya code aate hi purana
+# server band karke naya start kar deta hai.
+#
+# INSTALL (ek baar):
+#   copy scripts\post-merge .git\hooks\post-merge
+# ============================================================
+
+PORT=5500
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+
+# 1. Purana server band karo (jo is port par LISTEN kar raha ho)
+PID="$(netstat -ano 2>/dev/null | grep -E ":$PORT " | grep -i "LISTENING" | awk '{print $NF}' | head -n 1)"
+if [ -n "$PID" ]; then
+  taskkill //F //PID "$PID" >/dev/null 2>&1
+  echo "[post-merge] purana server band (pid $PID)"
+fi
+
+# 2. Naya server background me start karo
+if [ -n "$REPO_ROOT" ]; then
+  cd "$REPO_ROOT" || exit 0
+fi
+if command -v python >/dev/null 2>&1; then
+  PYTHON=python
+else
+  PYTHON=py
+fi
+nohup "$PYTHON" -m http.server "$PORT" >/dev/null 2>&1 &
+echo "[post-merge] server restart ho gaya -> http://localhost:$PORT"
