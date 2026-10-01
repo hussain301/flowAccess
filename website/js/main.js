@@ -1,4 +1,4 @@
-import { loginUser, registerUser, onAuthChange } from './auth.js';
+import { loginUser, registerUser, resetPassword, onAuthChange } from './auth.js';
 
 const loginForm = document.getElementById('loginForm');
 const registerForm = document.getElementById('registerForm');
@@ -73,6 +73,25 @@ loginForm.addEventListener('submit', async (e) => {
     showToast(error.message, 'error');
     btn.disabled = false;
     btn.innerText = 'Login';
+  }
+});
+
+const forgotPasswordLink = document.getElementById('forgotPasswordLink');
+forgotPasswordLink.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const email = loginForm.email.value.trim();
+  if (!email) {
+    showToast('Please enter your email address first.', 'error');
+    return;
+  }
+  forgotPasswordLink.style.pointerEvents = 'none';
+  try {
+    await resetPassword(email);
+    showToast('Password reset email sent — check your inbox.', 'success');
+  } catch (error) {
+    showToast(error.message, 'error');
+  } finally {
+    forgotPasswordLink.style.pointerEvents = '';
   }
 });
 

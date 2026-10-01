@@ -4,7 +4,8 @@ import {
   signInWithEmailAndPassword, 
   signOut, 
   onAuthStateChanged,
-  sendEmailVerification
+  sendEmailVerification,
+  sendPasswordResetEmail
 } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
 import { doc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 
@@ -78,6 +79,17 @@ export async function resendVerificationEmail() {
     await sendEmailVerification(user);
   } catch (error) {
     throw new Error(getFriendlyErrorMessage(error.code));
+  }
+}
+
+// Send Firebase's password-reset email. Never reveals whether the address
+// is registered (anti user-enumeration).
+export async function resetPassword(email) {
+  try {
+    await sendPasswordResetEmail(auth, email);
+  } catch (error) {
+    if (error.code === 'auth/user-not-found') return;
+    throw new Error(error.code ? getFriendlyErrorMessage(error.code) : (error.message || 'An error occurred.'));
   }
 }
 

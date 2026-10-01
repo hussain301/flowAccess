@@ -218,6 +218,22 @@ header {
   display: flex;
 }
 
+.forgot-row {
+  text-align: right;
+  margin-top: -0.5rem;
+}
+
+.forgot-link {
+  font-size: 0.875rem;
+  color: var(--accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.forgot-link:hover {
+  text-decoration: underline;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;
