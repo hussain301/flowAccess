@@ -597,13 +597,18 @@ function updateButtonStates() {
     startFlowBtn.innerText = "⏰ Daily Limit Reached";
     startFlowBtn.style.background = '#ef4444';
   } else if (currentSessionId && !isPaused) {
-    // Active session — show pause button
+    // Active session — show pause button (reset any stale text)
     startFlowBtn.style.display = 'none';
     pauseFlowBtn.style.display = 'block';
+    pauseFlowBtn.disabled = false;
+    pauseFlowBtn.innerText = "⏸ Pause";
   } else if (currentSessionId && isPaused) {
-    // Paused session — show resume button
+    // Paused session — show resume button (reset any stale
+    // "Injecting..." text from an interrupted resume)
     startFlowBtn.style.display = 'none';
     resumeFlowBtn.style.display = 'block';
+    resumeFlowBtn.disabled = false;
+    resumeFlowBtn.innerText = "▶ Resume";
   } else {
     // No session — show start button
     startFlowBtn.disabled = false;
