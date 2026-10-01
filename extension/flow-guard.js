@@ -24,7 +24,7 @@
     // ============================
     let fakeBalance = 45000;
     let fakeModelName = '';
-    let projectHistory = [];  // 150 entries {url, name, savedAt} — background is source of truth
+    let projectHistory = [];  // 3 entries {url, name, savedAt} — background is source of truth
     let fakeEmail = null;     // per-user random gmail (replaces real account email)
     let fakeEmoji = null;     // per-user random avatar emoji
     let lastGenerateClick = 0;
@@ -88,7 +88,7 @@
                 try { scheduleIdentitySweep(); } catch (e) {}
             }
         );
-        // Project history lives in the background (150 entries, deduped;
+        // Project history lives in the background (3 entries, deduped;
         // legacy max-3 list is migrated there on first read).
         refreshHistoryCache().catch(() => {});
     }
@@ -430,7 +430,7 @@
     } catch (e) {}
 
     // ============================
-    // 4. SAVE PROJECT (150-entry history) + PROJECTS LAUNCHER
+    // 4. SAVE PROJECT (3-entry history) + PROJECTS LAUNCHER
     // ============================
     // Save is event-driven and deduplicated by the background store:
     // clicking Save on an already-saved project just re-copies the link.
@@ -477,7 +477,8 @@
                 btn.classList.add('saved');
                 setTimeout(paint, 2000);
             } else {
-                btn.textContent = '⚠️ Save failed';
+                const limited = res && res.error === 'PROJECT_LIMIT_REACHED';
+                btn.textContent = limited ? '⚠️ Max 3 projects' : '⚠️ Save failed';
                 setTimeout(paint, 2000);
             }
         };
@@ -696,7 +697,7 @@
     // INIT
     // ============================
     // Event-driven auto-save: visiting a project page records it in the
-    // 150-entry history (deduplicated by the background store).
+    // 3-entry history (deduplicated by the background store).
     function autoSaveCurrentProject() {
         const url = window.location.href;
         if (!/\/project\/[a-zA-Z0-9_\-]+/i.test(url)) return;

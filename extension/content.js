@@ -146,7 +146,7 @@
             const { action, payload } = event.data;
 
             // 2a. Project history — forwarded to the background store
-            // (single source of truth; 150 entries, deduped by project ID)
+            // (single source of truth; 3 entries, deduped by project ID)
             if (action === 'GET_SAVED_PROJECTS' || action === 'PROJECT_LIST') {
                 const response = await chrome.runtime.sendMessage({ action: 'PROJECT_LIST' });
                 reply(response);

@@ -1,6 +1,6 @@
 // ============================================================
 // FlowAccess — Projects Side Panel
-// Lists the 150-entry project history with copy-one / copy-all /
+// Lists the 3-entry project history with copy-one / copy-all /
 // open / delete / clear actions. Copy uses 4 formats with a
 // clipboard fallback.
 // ============================================================
@@ -107,7 +107,7 @@
 
     function render() {
         const visible = filteredProjects();
-        countEl.textContent = '· ' + projects.length + '/150';
+        countEl.textContent = '· ' + projects.length + '/3';
         listEl.innerHTML = '';
         if (!visible.length) {
             const d = document.createElement('div');

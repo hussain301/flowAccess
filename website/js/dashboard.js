@@ -719,7 +719,7 @@ window.addEventListener('message', (event) => {
   }
 });
 
-// === SAVED PROJECTS (150-entry history, stored by the extension) ===
+// === SAVED PROJECTS (3-entry history, stored by the extension) ===
 const savedProjectsListEl = document.getElementById('savedProjectsList');
 const savedProjectsCountEl = document.getElementById('savedProjectsCount');
 
@@ -728,14 +728,14 @@ async function loadSavedProjects() {
   if (res && res.success && Array.isArray(res.projects)) {
     renderSavedProjects(res.projects);
   } else {
-    savedProjectsCountEl.textContent = '0/150';
+    savedProjectsCountEl.textContent = '0/3';
     savedProjectsListEl.innerHTML =
       '<p style="color: var(--text-muted); font-size: 0.875rem;">Install the FlowAccess extension to save projects.</p>';
   }
 }
 
 function renderSavedProjects(projects) {
-  savedProjectsCountEl.textContent = projects.length + '/150';
+  savedProjectsCountEl.textContent = projects.length + '/3';
   if (!projects.length) {
     savedProjectsListEl.innerHTML =
       '<p style="color: var(--text-muted); font-size: 0.875rem;">No saved projects yet.</p>';
@@ -752,8 +752,10 @@ function renderSavedProjects(projects) {
 
     const nameEl = document.createElement('span');
     nameEl.className = 'saved-project-id';
-    nameEl.title = url;
+    nameEl.title = url + ' — click to open';
     nameEl.textContent = label.length > 14 ? label.slice(0, 14) + '…' : label;
+    nameEl.style.cursor = 'pointer';
+    nameEl.addEventListener('click', () => window.open(url, '_blank', 'noopener'));
 
     const openBtn = document.createElement('button');
     openBtn.className = 'btn btn-primary btn-sm';
@@ -775,6 +777,14 @@ function renderSavedProjects(projects) {
     row.appendChild(openBtn);
     row.appendChild(delBtn);
     savedProjectsListEl.appendChild(row);
+  });
+}
+
+// === NEW PROJECT BUTTON (opens a blank Flow, does not auto-save) ===
+const newProjectBtn = document.getElementById('newProjectBtn');
+if (newProjectBtn) {
+  newProjectBtn.addEventListener('click', () => {
+    window.open('https://flow.google.com/', '_blank', 'noopener');
   });
 }
 
@@ -844,7 +854,7 @@ startFlowBtn.addEventListener('click', async () => {
 
     // 3. Start countdown timer + heartbeat (Flow tab was opened/reloaded
     //    by the extension after the cookies were injected)
-    showToast(`✅ Session started! ${inj.injected} cookies injected. Opening Flow...`, "success");
+    showToast(`✅ Session started! ${inj.injected} cookies injected.`, "success");
     startTimer();
     startHeartbeat();
     updateButtonStates();
@@ -972,7 +982,7 @@ resumeFlowBtn.addEventListener('click', async () => {
     startHeartbeat();
     updateButtonStates();
     
-    showToast("▶ Session resumed! Opening Flow...", "success");
+    showToast("▶ Session resumed!", "success");
     
   } catch(e) {
     console.error("Resume error:", e);

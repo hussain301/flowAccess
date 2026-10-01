@@ -98,31 +98,6 @@ function parseEndpointCookies(data) {
     throw new Error('Unknown cookie format in response');
 }
 
-// Open Flow in a NEW tab (dashboard tab is left untouched).
-// If a Flow tab already exists, RELOAD it so the just-injected cookies
-// take effect, then focus it. Injection must complete BEFORE this runs.
-async function openFlowTab(targetUrl) {
-    const finalUrl = targetUrl || 'https://flow.google.com/?pli=1';
-
-    try {
-        const existing = await chrome.tabs.query({ url: '*://flow.google.com/*' });
-        if (existing && existing.length > 0) {
-            const tab = existing[0];
-            // Reload (not just focus) — otherwise Flow keeps the old,
-            // logged-out state even though cookies are now in the jar.
-            try { await chrome.tabs.reload(tab.id, { bypassCache: true }); } catch (e) {}
-            try { await chrome.tabs.update(tab.id, { active: true }); } catch (e) {}
-            try { await chrome.windows.update(tab.windowId, { focused: true }); } catch (e) {}
-            return tab.id;
-        }
-    } catch (e) { /* fall through to create */ }
-
-    // Fresh tab: cookies are already in the jar, so the first load
-    // picks them up — no extra reload needed.
-    const tab = await chrome.tabs.create({ url: finalUrl, active: true });
-    return tab.id;
-}
-
 // ========================
 // 2. MESSAGE HANDLING
 // ========================
@@ -146,7 +121,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
                 const { injected, failed } = await setCookieList(request.cookies);
                 console.log('[FlowAccess] DEBUG INJECT_COOKIES received cookies:', request.cookies);
-                const tabId = await openFlowTab(request.targetUrl);
+                // No auto-open: the user opens Flow from the dashboard
+                // (saved project / New Project button). Injection only.
+                const tabId = null;
                 if (injected === 0) {
                     sendResponse({ success: false, injected, failed, tabId,
                         error: `0 of ${(request.cookies || []).length} cookies injected — cookie data invalid or rejected by the browser` });
@@ -186,23 +163,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 const { injected, failed } = await setCookieList(cookies);
 
-                // Only honor the endpoint-supplied URL when it points at Flow;
-                // anything else falls back to the default Flow URL.
-                let flowUrl = 'https://flow.google.com/?pli=1';
-                try {
-                    if (data && typeof data.url === 'string' &&
-                        new URL(data.url).hostname === 'flow.google.com') {
-                        flowUrl = data.url;
-                    }
-                } catch (e) { /* malformed URL — keep the default */ }
-
-                // Tab-open must never mask a successful injection.
+                // No auto-open: the user opens Flow from the dashboard
+                // (saved project / New Project button). Injection only.
                 let tabId = null;
-                try {
-                    tabId = await openFlowTab(flowUrl);
-                } catch (e) {
-                    console.warn('[FlowAccess] openFlowTab failed:', e);
-                }
 
                 if (injected === 0) {
                     sendResponse({ success: false, injected, failed, total: cookies.length, tabId,
@@ -289,7 +252,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
-    // ---- Project history (150 entries, deduped) ----
+    // ---- Project history (3 entries, deduped) ----
     if (request.action === 'PROJECT_SAVE') {
         (async () => {
             try {
@@ -369,13 +332,14 @@ function closeFlowTabs() {
 }
 
 // ========================
-// 2b. PROJECT HISTORY (max 150, event-driven dedup)
+// 2b. PROJECT HISTORY (max 3, event-driven dedup)
 // ========================
 // Single source of truth for saved Flow projects. Every save is
 // deduplicated by project ID: re-saving moves the entry to the front
-// instead of creating a duplicate. Capped at 150 entries (newest first).
+// instead of creating a duplicate. Capped at 3 entries (newest first) —
+// a 4th project cannot be saved until one is removed.
 const PROJECT_HISTORY_KEY = 'faProjectHistory';
-const PROJECT_HISTORY_MAX = 150;
+const PROJECT_HISTORY_MAX = 3;
 
 function projectIdOf(url) {
     try {
@@ -406,7 +370,8 @@ async function getProjectHistory() {
             await chrome.storage.local.set({ [PROJECT_HISTORY_KEY]: list });
         }
     } catch (e) {}
-    return Array.isArray(list) ? list : [];
+    // Enforce the 3-project cap on read too (drops any pre-cap extras).
+    return (Array.isArray(list) ? list : []).slice(0, PROJECT_HISTORY_MAX);
 }
 
 async function saveProjectToHistory(url, name) {
@@ -416,6 +381,11 @@ async function saveProjectToHistory(url, name) {
     const list = await getProjectHistory();
     const already = list.some(p => projectIdOf(p.url) === id);
     const next = list.filter(p => projectIdOf(p.url) !== id);
+    // Hard cap: a NEW project cannot be saved while 3 are already saved.
+    // Re-saving an existing one (moves to front) is always allowed.
+    if (!already && next.length >= PROJECT_HISTORY_MAX) {
+        return { success: false, error: 'PROJECT_LIMIT_REACHED', projects: list };
+    }
     const label = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 80) : id;
     next.unshift({ url: clean, name: label, savedAt: Date.now() });
     const trimmed = next.slice(0, PROJECT_HISTORY_MAX);
