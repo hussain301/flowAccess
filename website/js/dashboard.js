@@ -36,6 +36,7 @@ const extensionStatusEl = document.getElementById('extensionStatus');
 const startFlowBtn = document.getElementById('startFlowBtn');
 const pauseFlowBtn = document.getElementById('pauseFlowBtn');
 const resumeFlowBtn = document.getElementById('resumeFlowBtn');
+const endFlowBtn = document.getElementById('endFlowBtn');
 const timeRemainingEl = document.getElementById('timeRemaining');
 const progressCircle = document.getElementById('progressCircle');
 const historyTableBody = document.getElementById('historyTableBody');
@@ -816,11 +817,17 @@ async function isSlotTakenByOther() {
 }
 
 function showAlreadyActive() {
-  showToast("⚠️ You already have an active session. End it before starting a new one.", "error");
+  // The single-session slot is held by a session this tab doesn't own —
+  // almost always the user's own other tab/profile. The old message told
+  // the user to "end it" with no End button in the UI (a dead end), so
+  // reveal the End button as the escape hatch.
+  showToast("⚠️ A session is already active in another tab. End it below, then start fresh.", "error");
   startFlowBtn.disabled = false;
   startFlowBtn.innerText = "▶ Access Flow";
   resumeFlowBtn.disabled = false;
   resumeFlowBtn.innerText = "▶ Resume Session";
+  endFlowBtn.style.display = 'block';
+  endFlowBtn.disabled = false;
 }
 
 // === BUTTON STATES ===
@@ -833,6 +840,7 @@ function updateButtonStates() {
     startFlowBtn.style.display = '';
     pauseFlowBtn.style.display = 'none';
     resumeFlowBtn.style.display = 'none';
+    endFlowBtn.style.display = 'none';
     startFlowBtn.disabled = true;
     startFlowBtn.innerText = wdMissing ? "🛡️ FlowAccess Pro Required" : "⚠️ Extension Required";
     startFlowBtn.style.background = '#6b7280';
@@ -842,6 +850,7 @@ function updateButtonStates() {
   startFlowBtn.style.display = '';
   pauseFlowBtn.style.display = 'none';
   resumeFlowBtn.style.display = 'none';
+  endFlowBtn.style.display = 'none';
 
   if (remainingTimeMs <= 0) {
     // Time expired
@@ -854,6 +863,8 @@ function updateButtonStates() {
     pauseFlowBtn.style.display = 'block';
     pauseFlowBtn.disabled = false;
     pauseFlowBtn.innerText = "⏸ Pause";
+    endFlowBtn.style.display = 'block';
+    endFlowBtn.disabled = false;
   } else if (currentSessionId && isPaused) {
     // Paused session — show resume button (reset any stale
     // "Injecting..." text from an interrupted resume)
@@ -861,6 +872,8 @@ function updateButtonStates() {
     resumeFlowBtn.style.display = 'block';
     resumeFlowBtn.disabled = false;
     resumeFlowBtn.innerText = "▶ Resume";
+    endFlowBtn.style.display = 'block';
+    endFlowBtn.disabled = false;
   } else {
     // No session — show start button
     startFlowBtn.disabled = false;
@@ -1411,3 +1424,79 @@ async function endSession(status = 'Completed') {
     console.error("Error ending session:", error);
   }
 }
+
+// Force-end EVERYTHING the user holds: the local session (if any) plus
+// whoever currently owns the single-session slot — typically the user's
+// own ghost session in another tab/profile, which is what makes Resume /
+// Start fail with "already active" while this tab shows nothing running.
+// Same browser profile => wiping cookies + closing Flow tabs here also
+// neutralizes the other tab's injected cookies.
+async function endAllSessions() {
+  if (!currentUser) return;
+  endFlowBtn.disabled = true;
+  endFlowBtn.innerText = "⏳ Ending...";
+  try {
+    // 1. Neutralize this profile's cookies and Flow tabs first.
+    sendToExtension('WIPE_COOKIES', {});
+    sendToExtension('CLOSE_FLOW_TAB', {});
+
+    // 2. Close the local session row (if it is still open).
+    if (currentSessionId) {
+      try {
+        const sessionRef = doc(db, 'sessions', currentSessionId);
+        const s = await getDoc(sessionRef);
+        if (s.exists() && (s.data().status === 'Active' || s.data().status === 'Paused')) {
+          await updateDoc(sessionRef, {
+            status: 'Completed',
+            endedAt: serverTimestamp(),
+            endTime: serverTimestamp()
+          });
+        }
+      } catch (e) {
+        console.warn('[Dashboard] Could not close local session row:', e.message);
+      }
+    }
+
+    // 3. Transactionally end the slot holder (whoever it is) and release
+    //    the slot, so the next Start/Resume can claim it cleanly.
+    const userRef = doc(db, 'users', currentUser.uid);
+    try {
+      await runTransaction(db, async (tx) => {
+        const u = await tx.get(userRef);
+        const activeId = u.exists() ? (u.data().activeSessionId || null) : null;
+        if (!activeId) return;
+        if (activeId !== currentSessionId) {
+          const sRef = doc(db, 'sessions', activeId);
+          const sSnap = await tx.get(sRef);
+          if (sSnap.exists()) {
+            const st = sSnap.data().status;
+            if (st === 'Active' || st === 'Paused') {
+              tx.update(sRef, {
+                status: 'Expired',
+                endedAt: serverTimestamp(),
+                endTime: serverTimestamp(),
+                expiredReason: 'force-ended-by-user'
+              });
+            }
+          }
+        }
+        tx.update(userRef, { activeSessionId: deleteField() });
+      });
+    } catch (e) {
+      console.warn('[Dashboard] Could not release session slot:', e.message);
+    }
+
+    currentSessionId = null;
+    isPaused = false;
+    if (timerInterval) clearInterval(timerInterval);
+    stopHeartbeat();
+    showToast("🛑 Session ended. You can start fresh now.", "success");
+    await loadUsageData(); // refresh timer + button states from Firestore
+  } catch (error) {
+    console.error("Error ending session:", error);
+    showToast("❌ Could not end session. Try again.", "error");
+    endFlowBtn.disabled = false;
+    endFlowBtn.innerText = "🛑 End Session";
+  }
+}
+endFlowBtn.addEventListener('click', endAllSessions);
