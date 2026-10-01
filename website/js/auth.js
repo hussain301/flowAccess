@@ -22,7 +22,17 @@ export async function registerUser(name, email, password) {
     const user = userCredential.user;
     
     // Free verification email sent by Firebase itself (link, not code).
-    try { await sendEmailVerification(user); } catch (e) { console.warn('Verification email failed:', e); }
+    // If Google rejects the address (non-existent Gmail mailbox), roll the
+    // just-created account back so no orphan unverifiable user is left.
+    try {
+      await sendEmailVerification(user);
+    } catch (e) {
+      if (e.code === 'auth/invalid-email') {
+        try { await user.delete(); } catch (_) {}
+        throw new Error('This Gmail address doesn\'t appear to exist. Please register with your real Gmail address.');
+      }
+      console.warn('Verification email failed:', e);
+    }
 
     await setDoc(doc(db, "users", user.uid), {
       email: user.email,
