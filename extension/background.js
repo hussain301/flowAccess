@@ -145,6 +145,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     return;
                 }
                 const { injected, failed } = await setCookieList(request.cookies);
+                console.log('[FlowAccess] DEBUG INJECT_COOKIES received cookies:', request.cookies);
                 const tabId = await openFlowTab(request.targetUrl);
                 if (injected === 0) {
                     sendResponse({ success: false, injected, failed, tabId,
@@ -180,6 +181,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 const cookies = parseEndpointCookies(data);
                 console.log(`[FlowAccess] Got ${cookies.length} cookies from endpoint`);
+                console.log('[FlowAccess] DEBUG FETCH_AND_INJECT raw endpoint response:', data);
+                console.log('[FlowAccess] DEBUG FETCH_AND_INJECT parsed cookies:', cookies);
 
                 const { injected, failed } = await setCookieList(cookies);
 
