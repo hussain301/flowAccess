@@ -85,6 +85,11 @@ async function setCookieList(cookies) {
     // Single write — tracks exactly the cookies of this injection.
     await resetInjectedCookies(injectedDetails);
     console.log(`[FlowAccess] Injected ${injected} cookies, ${failed} failed`);
+    // Session (re)start: one-time sweep — close already-open Google tabs so
+    // the shared session can't be used outside Flow.
+    if (injected > 0) {
+        try { await closeOpenGoogleTabs(); } catch (e) {}
+    }
     return { injected, failed };
 }
 
@@ -530,6 +535,45 @@ chrome.tabs.onCreated.addListener((tab) => {
         handleTabNavigation(url).catch(() => {});
     }
 });
+
+// ========================
+// 3b. GOOGLE TAB GUARD
+// ========================
+// The injected session must never be usable outside Flow. Two rules:
+//
+// 1. On every injection — i.e. when the user starts/resumes a session —
+//    already-open Google tabs are CLOSED (one-time sweep).
+// 2. Afterwards, the away-wipe above already wipes the injected cookies the
+//    moment any tab navigates to a Google domain (google.com !=
+//    flow.google.com, so it counts as "away").
+//
+// flow.google.com is the session host and is never treated as "Google".
+
+function isGoogleDomainTab(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (!/^https?:\/\//i.test(url)) return false;
+    try {
+        const h = new URL(url).hostname.toLowerCase();
+        if (h === 'flow.google.com') return false;
+        return h === 'google.com' || h.endsWith('.google.com');
+    } catch (e) { return false; }
+}
+
+// One-time sweep on session resume: close Google tabs so the shared session
+// can't be used outside Flow. The user's own cookies are untouched — only
+// the tabs are closed.
+async function closeOpenGoogleTabs() {
+    let tabs = [];
+    try { tabs = await chrome.tabs.query({}); } catch (e) { return 0; }
+    let closed = 0;
+    for (const t of tabs || []) {
+        if (t && t.id != null && isGoogleDomainTab(t.url)) {
+            try { await chrome.tabs.remove(t.id); closed++; } catch (e) {}
+        }
+    }
+    if (closed) console.log(`[FlowAccess] Closed ${closed} Google tab(s) on session resume`);
+    return closed;
+}
 
 // ========================
 // 4. SINGLE FLOW TAB
