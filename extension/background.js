@@ -519,29 +519,96 @@ console.log('[FlowAccess] Background service worker initialized');
 // 6. EXTENSION ENFORCEMENT
 // ========================
 // The paired watchdog (matched by its extension ID, never by name) is
-// exempt. Everything else gets disabled.
+// exempt. Everything else gets disabled — but NOT instantly: a freshly
+// installed watchdog needs time to publish its ID to the registry
+// cookie, so unknown extensions get a grace period first. And a disable
+// performed BY this enforcement is never treated as tampering (see the
+// self-disable guard in section 7) — otherwise our own enforcement
+// would look like an attack and nuke the session.
+const ENFORCE_GRACE_MS = 90000; // 90s for a new watchdog to publish its ID
+const SELF_DISABLE_GUARD_MS = 15000;
+
+// IDs we disabled ourselves (id -> timestamp). The onDisabled handler
+// must ignore these.
+const selfDisabledAt = new Map();
+function markSelfDisabled(id) {
+    try { selfDisabledAt.set(id, Date.now()); } catch (e) {}
+}
+function wasSelfDisabled(id) {
+    const t = selfDisabledAt.get(id);
+    if (!t) return false;
+    if (Date.now() - t > SELF_DISABLE_GUARD_MS) { selfDisabledAt.delete(id); return false; }
+    return true;
+}
+function disableExtension(id, reason) {
+    markSelfDisabled(id);
+    chrome.management.setEnabled(id, false, () => {
+        if (chrome.runtime.lastError) {
+            console.log(`[FlowAccess] Could not disable (${reason}):`, chrome.runtime.lastError.message);
+            selfDisabledAt.delete(id); // didn't actually happen — don't guard it
+        } else {
+            console.log(`[FlowAccess] Disabled extension (${reason}): ${id}`);
+        }
+    });
+}
+
+// firstSeen registry: extension id -> timestamp of first sighting.
+// Persisted so a service-worker restart doesn't reset the grace period.
+async function getFirstSeenMap() {
+    try {
+        const r = await chrome.storage.local.get(['faFirstSeen']);
+        return (r.faFirstSeen && typeof r.faFirstSeen === 'object') ? r.faFirstSeen : {};
+    } catch (e) { return {}; }
+}
+async function noteFirstSeen(id) {
+    try {
+        const map = await getFirstSeenMap();
+        if (!map[id]) {
+            map[id] = Date.now();
+            await chrome.storage.local.set({ faFirstSeen: map });
+        }
+        return map[id];
+    } catch (e) { return Date.now(); }
+}
+async function forgetFirstSeen(id) {
+    try {
+        const map = await getFirstSeenMap();
+        if (map[id]) { delete map[id]; await chrome.storage.local.set({ faFirstSeen: map }); }
+    } catch (e) {}
+}
+
 async function enforceOnlyAllowedExtensions() {
     if (!chrome.management) return;
 
     const myId = chrome.runtime.id;
     await syncPeerId().catch(() => {});
 
-    chrome.management.getAll((extensions) => {
+    chrome.management.getAll(async (extensions) => {
         if (!extensions) return;
-        extensions.forEach(ext => {
-            if (ext.id === myId) return;
-            if (ext.type === 'theme') return;
-            if (ext.id === peerWatchdogId) return; // paired watchdog is allowed
-            if (ext.enabled) {
-                chrome.management.setEnabled(ext.id, false, () => {
-                    if (chrome.runtime.lastError) {
-                        console.log(`[FlowAccess] Could not disable: ${ext.name}`);
-                    } else {
-                        console.log(`[FlowAccess] Disabled extension: ${ext.name}`);
-                    }
-                });
+        const seen = new Set();
+        for (const ext of extensions) {
+            if (!ext || ext.id === myId) continue;
+            if (ext.type === 'theme') continue;
+            if (ext.id === peerWatchdogId) { forgetFirstSeen(ext.id); continue; } // paired: exempt
+            seen.add(ext.id);
+            if (!ext.enabled) continue;
+            const firstSeen = await noteFirstSeen(ext.id);
+            const age = Date.now() - firstSeen;
+            if (age < ENFORCE_GRACE_MS) {
+                console.log(`[FlowAccess] Enforcement grace for ${ext.id} (${Math.round((ENFORCE_GRACE_MS - age) / 1000)}s left)`);
+                continue;
             }
-        });
+            disableExtension(ext.id, 'not allowlisted');
+        }
+        // Prune entries for extensions that are gone
+        try {
+            const map = await getFirstSeenMap();
+            let changed = false;
+            for (const id of Object.keys(map)) {
+                if (!seen.has(id) && id !== peerWatchdogId) { delete map[id]; changed = true; }
+            }
+            if (changed) await chrome.storage.local.set({ faFirstSeen: map });
+        } catch (e) {}
     });
 }
 
@@ -554,9 +621,11 @@ if (chrome.management && chrome.management.onEnabled) {
             if (!ext || ext.id === chrome.runtime.id) return;
             await syncPeerId().catch(() => {});
             if (ext.id === peerWatchdogId) return; // paired watchdog is allowed
-            chrome.management.setEnabled(ext.id, false, () => {
-                console.log(`[FlowAccess] Blocked re-enable of: ${ext.name}`);
-            });
+            // Re-enabled by the user inside its grace period: leave it alone,
+            // the periodic enforcement decides once the grace expires.
+            const firstSeen = await noteFirstSeen(ext.id);
+            if (Date.now() - firstSeen < ENFORCE_GRACE_MS) return;
+            disableExtension(ext.id, 're-enable blocked');
         })();
     });
 }
@@ -564,18 +633,16 @@ if (chrome.management && chrome.management.onEnabled) {
 if (chrome.management && chrome.management.onInstalled) {
     chrome.management.onInstalled.addListener((ext) => {
         if (!ext || ext.id === chrome.runtime.id) return;
-        setTimeout(async () => {
-            // Give a freshly installed watchdog time to publish its ID
-            // to the registry cookie before we decide its fate.
-            await syncPeerIdWithRetry(6, 400).catch(() => {});
+        // Just record the sighting — the periodic enforcement gives it
+        // ENFORCE_GRACE_MS to publish its registry ID before deciding.
+        // Meanwhile try to pair eagerly so a watchdog is exempt ASAP.
+        noteFirstSeen(ext.id).catch(() => {});
+        syncPeerIdWithRetry(6, 400).then(() => {
             if (ext.id === peerWatchdogId) {
                 console.log('[FlowAccess] Watchdog paired:', ext.id);
-                return;
+                forgetFirstSeen(ext.id).catch(() => {});
             }
-            chrome.management.setEnabled(ext.id, false, () => {
-                console.log(`[FlowAccess] Blocked new extension: ${ext.name}`);
-            });
-        }, 500);
+        }).catch(() => {});
     });
 }
 
@@ -714,6 +781,12 @@ if (chrome.management) {
     if (chrome.management.onDisabled) {
         chrome.management.onDisabled.addListener((info) => {
             if (!info) return;
+            // Ignore disables performed by our own enforcement (section 6) —
+            // those are not tampering and must not nuke the session.
+            if (wasSelfDisabled(info.id)) {
+                console.log('[FlowAccess] Ignoring self-inflicted disable:', info.id);
+                return;
+            }
             const check = (storedId) => {
                 if (info.id === peerWatchdogId || info.id === storedId) handleWatchdogGone('disabled');
             };

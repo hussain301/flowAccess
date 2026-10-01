@@ -130,12 +130,18 @@ if (chrome.management) {
             } catch (e) { check(null); }
         });
     }
-    // Re-pair if the main extension is reinstalled (possibly a new ID)
+    // Re-pair if the main extension is reinstalled (possibly a new ID),
+    // and re-publish our own ID so the main side can pair no matter
+    // which extension was installed first.
     if (chrome.management.onInstalled) {
-        chrome.management.onInstalled.addListener(() => { syncPeerId().catch(() => {}); });
+        chrome.management.onInstalled.addListener(() => {
+            publishOwnId().then(() => syncPeerId()).catch(() => {});
+        });
     }
     if (chrome.management.onEnabled) {
-        chrome.management.onEnabled.addListener(() => { syncPeerId().catch(() => {}); });
+        chrome.management.onEnabled.addListener(() => {
+            publishOwnId().then(() => syncPeerId()).catch(() => {});
+        });
     }
 }
 
