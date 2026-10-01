@@ -21,8 +21,10 @@ onAuthChange(user => {
   }
 });
 
-// First-visit Quick Note — shown unless the extension's Google-login check pre-empts it.
+// First-visit Quick Note — desktop only (mobile has its own browser
+// guidance popup), shown unless the extension's Google-login check pre-empts it.
 function showQuickNote() {
+  if (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '')) return; // never on phones
   if (!localStorage.getItem('flowAccess_visited')) {
     infoModal.classList.add('show');
     localStorage.setItem('flowAccess_visited', 'true');
