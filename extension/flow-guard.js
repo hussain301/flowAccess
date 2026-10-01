@@ -556,11 +556,12 @@
     // 11. MODEL AUTO-SWITCH
     // ============================
     // User request 2026-10-01: his Flow account has no credits for the paid
-    // models, so any model the user picks is switched to the working one:
-    // "Veo 3.1 - Lite [Lower Priority]". Flow's own selector then shows the
-    // actually-selected model. Matching is fuzzy (normalized text) so extra
-    // icons/whitespace in the menu items can't break it. Interception happens
-    // on pointerdown AND click (capture phase), whichever Flow uses.
+    // models, so "Veo 3.1 - Lite [Lower Priority]" — the 5th item in Flow's
+    // model menu (user's XPath: //flow-menu-item[5]/button) — must ALWAYS be
+    // the selected model: on page load, and whenever the user picks any other
+    // model. Flow's own selector then shows the actually-selected model.
+    // Matching is fuzzy (normalized text) so extra icons/whitespace can't
+    // break it; interception is on pointerdown AND click (capture phase).
     const FA_MODEL_BTN_SEL = 'flow-menu-item button, .mat-mdc-menu-content button, button.mat-mdc-menu-item';
     const FA_TARGET_HINT = 'lower priority';
     const FA_MODEL_HINTS = ['omni 1.1 flash', 'veo 3.1 - lite', 'veo 3.1 - fast', 'veo 3.1 - quality'];
@@ -570,12 +571,19 @@
     function faIsOtherModelButton(btn) {
         const t = faNorm(btn.textContent);
         if (!t || t.indexOf(FA_TARGET_HINT) !== -1) return false;
+        if (btn.closest('flow-menu-item')) return true; // the model menu's own items
         return FA_MODEL_HINTS.some(h => t.indexOf(h) !== -1);
     }
 
+    // Target item: text match first, 5th menu item as fallback (user's XPath).
     function faFindTargetItem() {
-        const items = document.querySelectorAll(FA_MODEL_BTN_SEL);
+        const items = document.querySelectorAll('flow-menu-item button');
         for (const b of items) {
+            if (faNorm(b.textContent).indexOf(FA_TARGET_HINT) !== -1) return b;
+        }
+        if (items.length >= 5) return items[4]; // flow-menu-item[5]
+        const any = document.querySelectorAll(FA_MODEL_BTN_SEL);
+        for (const b of any) {
             if (faNorm(b.textContent).indexOf(FA_TARGET_HINT) !== -1) return b;
         }
         return null;
@@ -586,7 +594,10 @@
     function faInterceptModelPick(e) {
         try {
             const btn = (e.target && e.target.closest) ? e.target.closest(FA_MODEL_BTN_SEL) : null;
-            if (!btn || !faIsOtherModelButton(btn)) return;
+            if (!btn) return;
+            // Only items inside the OPEN menu — never the selector trigger itself.
+            if (!btn.closest('.cdk-overlay-container, .mat-mdc-menu-content, flow-menu-item')) return;
+            if (!faIsOtherModelButton(btn)) return;
             // pointerdown + click both fire for one user gesture: handle once.
             const now = Date.now();
             if (now - faLastIntercept < 800) return;
@@ -609,6 +620,76 @@
         document.addEventListener('pointerdown', faInterceptModelPick, true);
         document.addEventListener('click', faInterceptModelPick, true);
         console.log('[FlowAccess] model auto-switch watch active');
+    }
+
+    // The model selector trigger: the closed dropdown showing the current model.
+    function faModelTrigger() {
+        const els = document.querySelectorAll('button, [role="button"]');
+        for (const el of els) {
+            if (el.closest('.cdk-overlay-container, .mat-mdc-menu-content')) continue;
+            const t = faNorm(el.textContent);
+            if (!t || t.length > 60) continue;
+            if (t.indexOf(FA_TARGET_HINT) !== -1) return el;
+            if (FA_MODEL_HINTS.some(h => t.indexOf(h) !== -1)) return el;
+        }
+        return null;
+    }
+
+    // Open the model menu invisibly and pick the target item (used on load).
+    function faOpenAndPickTarget() {
+        let trig = null;
+        try { trig = faModelTrigger(); } catch (e) {}
+        if (!trig) return;
+        const overlay = document.querySelector('.cdk-overlay-container');
+        const prevVis = overlay ? overlay.style.visibility : '';
+        const restore = () => { if (overlay) overlay.style.visibility = prevVis; };
+        setTimeout(restore, 8000); // failsafe
+        if (overlay) overlay.style.visibility = 'hidden'; // no visible flicker
+        try { trig.click(); } catch (e) {}
+        let inner = 0;
+        const iv2 = setInterval(() => {
+            inner++;
+            let target = null;
+            try { target = faFindTargetItem(); } catch (e) {}
+            if (target) {
+                clearInterval(iv2);
+                restore();
+                try { target.click(); } catch (e) {}
+                console.log('[FlowAccess] model auto-selected on load: Veo 3.1 - Lite [Lower Priority]');
+            } else if (inner > 20) {
+                clearInterval(iv2);
+                restore();
+                try { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 27, bubbles: true })); } catch (e) {}
+            }
+        }, 200);
+    }
+
+    // On page load: make sure the target model ends up selected.
+    function faEnsureTargetOnLoad() {
+        if (window.__faEnsure) return;
+        window.__faEnsure = true;
+        let tries = 0;
+        const iv = setInterval(() => {
+            tries++;
+            let cur = null, menuOpen = false;
+            try {
+                const trig = faModelTrigger();
+                cur = trig ? faNorm(trig.textContent) : null;
+                menuOpen = !!faFindTargetItem();
+            } catch (e) {}
+            if (cur && cur.indexOf(FA_TARGET_HINT) !== -1) { clearInterval(iv); return; } // already correct
+            if (menuOpen) {
+                // Menu is already open: pick the target directly.
+                clearInterval(iv);
+                let target = null;
+                try { target = faFindTargetItem(); } catch (e) {}
+                if (target) { try { target.click(); } catch (e) {} }
+                return;
+            }
+            if (!cur) { if (tries >= 15) clearInterval(iv); return; } // trigger not rendered yet
+            clearInterval(iv);
+            faOpenAndPickTarget();
+        }, 1000);
     }
 
     // ============================
@@ -636,6 +717,7 @@
         applyFakeIdentity();
         blurOtherProjects();
         faWatchModelSelect();
+        faEnsureTargetOnLoad();
     }
 
     if (document.readyState === 'loading') {
