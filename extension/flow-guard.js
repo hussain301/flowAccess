@@ -198,28 +198,6 @@
         #fa-save-btn:hover { background: #1557b0 !important; transform: translateY(-2px) !important; }
         #fa-save-btn.saved { background: #0d9488 !important; }
 
-        /* --- Projects Launcher (opens the side panel) --- */
-        #fa-projects-launcher {
-            position: fixed !important;
-            bottom: 20px !important;
-            left: 20px !important;
-            background: #3c4043 !important;
-            color: #e8eaed !important;
-            border: 1px solid #5f6368 !important;
-            padding: 10px 20px !important;
-            border-radius: 24px !important;
-            font-family: 'Google Sans', sans-serif !important;
-            font-size: 14px !important;
-            font-weight: 500 !important;
-            cursor: pointer !important;
-            z-index: 999999 !important;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.45) !important;
-            display: flex !important;
-            align-items: center !important;
-            gap: 8px !important;
-        }
-        #fa-projects-launcher:hover { background: #4d5156 !important; transform: translateY(-2px) !important; }
-
         /* --- Fake per-user avatar (replaces real Google profile photo) --- */
         .fa-fake-avatar {
             display: inline-flex !important;
@@ -485,26 +463,6 @@
         document.body.appendChild(btn);
     }
 
-    // Floating launcher (bottom-left) — opens the projects side panel.
-    function showProjectsLauncher() {
-        if (document.getElementById('fa-projects-launcher')) return;
-        if (!document.body) return;
-        const btn = document.createElement('button');
-        btn.id = 'fa-projects-launcher';
-        btn.textContent = '📁 Projects';
-        btn.title = 'Open saved projects';
-        btn.onclick = async () => {
-            btn.textContent = '⏳…';
-            const res = await bgSend('OPEN_SIDE_PANEL');
-            btn.textContent = '📁 Projects';
-            if (!res || !res.success) {
-                btn.textContent = '⚠️ Failed';
-                setTimeout(() => { btn.textContent = '📁 Projects'; }, 2000);
-            }
-        };
-        document.body.appendChild(btn);
-    }
-
     // ============================
     // 7. KEYBOARD + CONTEXT MENU BLOCK
     // ============================
@@ -713,7 +671,6 @@
         renderFakeCredits();
         detectModel();
         showSaveButton();
-        showProjectsLauncher();
         autoSaveCurrentProject();
         applyFakeIdentity();
         blurOtherProjects();
