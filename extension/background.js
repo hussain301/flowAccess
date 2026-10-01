@@ -64,7 +64,7 @@ async function setCookieList(cookies) {
     // clear them first, so the injected shared session never mixes with
     // (or destroys) the user's own login — that mix is what triggers
     // Google's CookieMismatch page.
-    await backupAndClearGoogleCookies();
+    await backupAndClearGoogleCookies(cookies);
     let injected = 0, failed = 0;
     const injectedDetails = [];
     const list = Array.isArray(cookies) ? cookies.slice(0, 500) : [];
@@ -184,27 +184,104 @@ function cookieToSetDetails(cookie) {
     return details;
 }
 
-// Snapshot + clear all Google/Flow cookies BEFORE injecting the shared
-// session. Keeps any previously-taken backup (e.g. after a crash) so the
-// user's original cookies are never overwritten by a second backup.
-async function backupAndClearGoogleCookies() {
+// ========================
+// COMPLETE GOOGLE SCOPE (backup + wipe coverage)
+// ========================
+// A Google login does not live on google.com alone — the SAME cookie names
+// (SID/HSID/SSID/APISID/SAPISID...) also exist on youtube.com,
+// googleapis.com, gmail.com, google.<country> etc. Only handling
+// google.com left those other domains as a half-admin/half-user mix, which
+// is exactly what kept producing CookieMismatch. The scope below covers
+// every Google-owned domain, plus any domain present in the cookie set
+// being injected (derived per injection).
+const GOOGLE_DOMAIN_SUFFIXES = [
+    'google.com', // also covers accounts.google.com, flow.google.com, ...
+    'youtube.com',
+    'youtu.be',
+    'googleapis.com',
+    'gstatic.com',
+    'googleusercontent.com',
+    'gmail.com',
+    'googlemail.com',
+    'googlevideo.com',
+    'ggpht.com',
+];
+
+// google.<country>: google.co.uk, google.com.pk, google.de, ...
+function isGoogleCcTld(d) {
+    return /(^|\.)google\.[a-z]{2,3}(\.[a-z]{2,3})?$/.test(d);
+}
+
+// Domains touched by the incoming cookie set, plus their parents — a
+// host-only accounts.google.com cookie also pulls in the .google.com
+// scope whose cookies are sent to that host.
+function scopeSuffixesFor(cookies) {
+    const set = new Set(GOOGLE_DOMAIN_SUFFIXES);
+    for (const c of (Array.isArray(cookies) ? cookies : [])) {
+        let d = String((c && c.domain) || '').toLowerCase().replace(/^\./, '');
+        if (!d) d = 'google.com';
+        const parts = d.split('.');
+        for (let i = 0; i < parts.length - 1; i++) set.add(parts.slice(i).join('.'));
+    }
+    return set;
+}
+
+function isScopedCookie(cookie, scope) {
+    const d = String((cookie && cookie.domain) || '').toLowerCase().replace(/^\./, '');
+    if (!d) return false;
+    if (isGoogleCcTld(d)) return true;
+    for (const s of scope) { if (d === s || d.endsWith('.' + s)) return true; }
+    return false;
+}
+
+// Remove every in-scope cookie, then VERIFY the jar is actually clean
+// (up to 3 passes). Returns the number of cookies that resisted removal.
+async function clearScopedCookies(scope, why) {
+    let lastTargets = [];
+    for (let pass = 1; pass <= 3; pass++) {
+        let all = [];
+        try { all = await chrome.cookies.getAll({}) || []; } catch (e) { break; }
+        const targets = all.filter(c => isScopedCookie(c, scope));
+        if (!targets.length) {
+            if (pass > 1 || lastTargets.length) console.log(`[FlowAccess] ${why}: jar clean (pass ${pass}).`);
+            return 0;
+        }
+        lastTargets = targets;
+        await Promise.all(targets.map(removeOneCookie));
+    }
+    let rest = [];
+    try { rest = (await chrome.cookies.getAll({}) || []).filter(c => isScopedCookie(c, scope)); } catch (e) {}
+    if (rest.length) console.warn(`[FlowAccess] ${why}: ${rest.length} cookies resisted wipe:`,
+        rest.map(c => `${c.name}@${c.domain}`).join(', '));
+    return rest.length;
+}
+
+// COMPLETE backup + wipe BEFORE injecting the shared session:
+// 1. Snapshot the user's own cookies across the COMPLETE Google scope
+//    (keeps any previously-taken backup, e.g. after a crash, so the
+//    user's originals are never overwritten by a second backup).
+// 2. Wipe the complete scope and VERIFY it is empty.
+// 3. Only then inject the new cookies into a clean jar.
+async function backupAndClearGoogleCookies(cookies) {
+    const scope = scopeSuffixesFor(cookies);
     const existing = await getCookieBackup();
-    if (existing.length) {
+    if (!existing.length) {
+        let all = [];
+        try { all = await chrome.cookies.getAll({}) || []; } catch (e) { all = []; }
+        const targets = all.filter(c => isScopedCookie(c, scope));
+        const backup = targets.map(cookieToSetDetails);
+        try {
+            await chrome.storage.local.set({ [FA_COOKIE_BACKUP_KEY]: backup });
+            console.log(`[FlowAccess] Backed up ${backup.length} user cookies (complete Google scope).`);
+        } catch (e) {
+            console.warn('[FlowAccess] Could not store cookie backup:', e);
+            return;
+        }
+    } else {
         console.log('[FlowAccess] Cookie backup already held — keeping the original.');
-        return;
     }
-    let all = [];
-    try { all = await chrome.cookies.getAll({}) || []; } catch (e) { return; }
-    const targets = all.filter(isWipeableCookie);
-    const backup = targets.map(cookieToSetDetails);
-    try {
-        await chrome.storage.local.set({ [FA_COOKIE_BACKUP_KEY]: backup });
-    } catch (e) {
-        console.warn('[FlowAccess] Could not store cookie backup:', e);
-        return;
-    }
-    await Promise.all(targets.map(removeOneCookie));
-    console.log(`[FlowAccess] Backed up & cleared ${targets.length} Google/Flow cookies.`);
+    const leftover = await clearScopedCookies(scope, 'pre-inject clear');
+    if (leftover) console.warn(`[FlowAccess] ${leftover} cookies still present after pre-inject clear.`);
 }
 
 // Restore the user's own Google/Flow cookies after the full wipe, then
@@ -689,17 +766,11 @@ function enforceSingleFlowTab() {
 }
 
 // ========================
-// 5. SCOPED COOKIE WIPE (Session End)
+// 5. COMPLETE COOKIE WIPE (Session End)
 // ========================
-// Only removes Google/Flow cookies. Other sites' cookies and
+// Removes the shared session across the COMPLETE Google scope —
+// anything the injection may have touched. Other sites' cookies and
 // unrelated tabs are never touched.
-
-const WIPE_DOMAIN_SUFFIXES = ['google.com', 'flow.google.com', 'gstatic.com'];
-
-function isWipeableCookie(cookie) {
-    const d = (cookie.domain || '').toLowerCase().replace(/^\./, '');
-    return WIPE_DOMAIN_SUFFIXES.some(suffix => d === suffix || d.endsWith('.' + suffix));
-}
 
 function removeOneCookie(cookie) {
     return new Promise((resolve) => {
@@ -715,17 +786,11 @@ function removeOneCookie(cookie) {
 }
 
 async function wipeFlowCookies() {
-    console.warn('[FlowAccess] Wiping Flow/Google cookies (scoped)...');
-    try {
-        const all = await chrome.cookies.getAll({});
-        const targets = (all || []).filter(isWipeableCookie);
-        await Promise.all(targets.map(removeOneCookie));
-        console.log(`[FlowAccess] Removed ${targets.length} Flow/Google cookies.`);
-    } catch (e) {
-        console.warn('[FlowAccess] Scoped wipe error:', e);
-    }
-    // Bring the user's own Google login back (if we backed it up before
-    // injecting the shared session).
+    console.warn('[FlowAccess] Wiping Google/Flow cookies (complete scope)...');
+    const scope = scopeSuffixesFor([]);
+    const leftover = await clearScopedCookies(scope, 'session wipe');
+    console.log(`[FlowAccess] Session wipe done (${leftover} leftover).`);
+    // Bring the user's own Google login back (backed up before injection).
     try { await restoreGoogleCookies(); } catch (e) {
         console.warn('[FlowAccess] Cookie restore error:', e);
     }
