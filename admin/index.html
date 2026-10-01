@@ -21,8 +21,8 @@
     @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Login */
-    .login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
-    .login-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 2rem; width: 380px; backdrop-filter: blur(20px); }
+    .login-screen { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
+    .login-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 2rem; width: 380px; max-width: calc(100vw - 2rem); backdrop-filter: blur(20px); }
     .login-card h2 { text-align: center; margin-bottom: 0.25rem; }
     .login-card > p { text-align: center; color: var(--muted); margin-bottom: 1.5rem; font-size: 0.875rem; }
     .error-text { color: var(--danger); font-size: 0.8rem; text-align: center; margin: 0.5rem 0; }
@@ -62,6 +62,15 @@
     .header-actions { display: flex; gap: 0.5rem; align-items: center; }
     .search-input { padding: 0.5rem 0.8rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.85rem; outline: none; }
 
+    /* Users toolbar + pagination (markup exists, styles were missing) */
+    .users-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .search-box { display: flex; gap: 0.5rem; flex: 1; min-width: 220px; }
+    .search-box input { flex: 1; min-width: 0; padding: 0.55rem 0.8rem; background: rgba(255,255,255,0.05); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.85rem; outline: none; }
+    .search-box input:focus { border-color: var(--accent); }
+    .users-total { font-size: 0.8rem; color: var(--muted); white-space: nowrap; }
+    .pagination { display: flex; justify-content: center; align-items: center; gap: 0.75rem; padding: 1rem; flex-wrap: wrap; }
+    .page-info { font-size: 0.8rem; color: var(--muted); text-align: center; }
+
     /* Stats */
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
     .stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1.25rem; }
@@ -94,6 +103,64 @@
     .toast.success { border-color: rgba(16,185,129,0.4); }
     .toast.error { border-color: rgba(239,68,68,0.4); }
     @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    /* ---------- Mobile responsiveness (phones ~360px) ---------- */
+    @media (max-width: 768px) {
+      /* Sidebar becomes a sticky top bar with horizontal nav */
+      .main-app { flex-direction: column; }
+      .sidebar {
+        position: sticky; top: 0; z-index: 500;
+        width: 100%; height: auto;
+        flex-direction: row; flex-wrap: wrap; align-items: center;
+        gap: 0.5rem 0.75rem; padding: 0.6rem 0.8rem;
+        border-right: none; border-bottom: 1px solid var(--border);
+        background: #0d0d14; /* solid so scrolled content doesn't show through */
+      }
+      .sidebar h2 { margin-bottom: 0; font-size: 1rem; flex: 1; white-space: nowrap; }
+      .sidebar-nav { flex: 1 1 100%; order: 5; flex-direction: row; overflow-x: auto; gap: 4px; padding-bottom: 2px; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+      .sidebar-nav::-webkit-scrollbar { display: none; }
+      .nav-item { white-space: nowrap; padding: 0.55rem 0.75rem; min-height: 44px; display: inline-flex; align-items: center; }
+      .sidebar-footer { border-top: none; padding-top: 0; display: flex; align-items: center; }
+      .sidebar-footer .email { display: none; }
+      .content { margin-left: 0; padding: 1rem; }
+
+      /* View headers: buttons stack full-width */
+      .view-header h1 { font-size: 1.25rem; }
+      .header-actions { width: 100%; }
+      .header-actions .btn { flex: 1; min-height: 44px; }
+      .search-input { width: 100%; min-height: 44px; }
+      .users-toolbar { flex-direction: column; align-items: stretch; }
+      .search-box { min-width: 0; }
+      .search-box input { min-height: 44px; font-size: 1rem; }
+
+      /* Stats stack single column */
+      .stats-grid { grid-template-columns: 1fr; }
+
+      /* Tables scroll horizontally instead of squeezing */
+      .table-card { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      table { min-width: 620px; }
+      td, th { padding: 0.6rem 0.75rem; }
+
+      /* Touch-friendly tap targets */
+      .btn { min-height: 44px; }
+      .btn-sm { min-height: 38px; min-width: 38px; }
+      .actions-cell { flex-wrap: nowrap; }
+      .form-group input, .form-group select { min-height: 44px; font-size: 1rem; } /* 16px stops iOS auto-zoom */
+
+      /* Modals fit the screen and scroll if tall */
+      .modal { padding: 1rem; align-items: flex-start; overflow-y: auto; }
+      .modal-content { width: 100%; max-width: 100%; margin: auto 0; }
+      .modal-actions { flex-wrap: wrap; }
+      .modal-actions .btn { flex: 1 1 auto; }
+
+      /* Settings form */
+      #setTimeLimit { max-width: 100% !important; width: 100%; }
+      #settingsMsg { display: block; margin: 0.75rem 0 0 0 !important; }
+
+      /* Toasts fit the screen width */
+      .toast-container { left: 1rem; right: 1rem; }
+      .toast { font-size: 0.8rem; }
+    }
   </style>
 </head>
 <body>
