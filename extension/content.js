@@ -45,7 +45,8 @@
         'PROJECT_LIST',
         'PROJECT_REMOVE',
         'PROJECT_CLEAR',
-        'OPEN_SIDE_PANEL'
+        'OPEN_SIDE_PANEL',
+        'UNPAIR_PEER'
     ]);
 
     const DEFAULT_ORIGINS = ['http://localhost:5500'];
@@ -127,9 +128,16 @@
         };
 
         try {
-            // 1. Origin must be a configured dashboard origin
+            // 1. Origin must be a configured dashboard origin.
+            // Never drop silently: tell the page exactly why, so the
+            // dashboard shows the real cause instead of a generic
+            // "Extension not responding" after its request timeout.
             const origins = await getAllowedOrigins();
-            if (!origins.includes(event.origin)) return; // silently drop
+            if (!origins.includes(event.origin)) {
+                console.warn('[FlowAccess] Dropped bridge message — origin not allowed:', event.origin);
+                reply({ success: false, error: 'Origin not allowed: ' + event.origin });
+                return;
+            }
 
             const { action, payload } = event.data;
 

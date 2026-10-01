@@ -42,9 +42,11 @@ function toCookieDetails(c) {
         path: typeof c.path === 'string' && c.path ? c.path : '/',
         secure: c.secure !== false,
         httpOnly: !!c.httpOnly,
-        sameSite: (['no_restriction', 'lax', 'strict'].includes(String(c.sameSite || '').toLowerCase()))
-            ? String(c.sameSite).toLowerCase()
-            : 'lax'
+        sameSite: (() => {
+            const s = String(c.sameSite || '').toLowerCase();
+            if (s === 'none') return 'no_restriction'; // chrome.cookies.set rejects 'none'
+            return (['no_restriction', 'lax', 'strict'].includes(s)) ? s : 'lax';
+        })()
     };
 
     if (typeof c.expirationDate === 'number' && c.expirationDate > 0) {
@@ -64,8 +66,15 @@ async function setCookieList(cookies) {
         try {
             const details = toCookieDetails(c);
             if (!details) { failed++; continue; }
-            await chrome.cookies.set(details);
-            injected++;
+            // chrome.cookies.set resolves to null (no throw) when the
+            // browser refuses the cookie — only count truthy results.
+            const setResult = await chrome.cookies.set(details);
+            if (setResult) {
+                injected++;
+            } else {
+                failed++;
+                console.warn(`[FlowAccess] Cookie refused (null result): ${details.name} on ${details.domain}`);
+            }
         } catch (err) {
             console.warn(`[FlowAccess] Cookie set error for ${c && c.name}:`, err);
             failed++;
@@ -139,7 +148,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const tabId = await openFlowTab(request.targetUrl);
                 if (injected === 0) {
                     sendResponse({ success: false, injected, failed, tabId,
-                        error: `0 of ${request.cookies.length} cookies injected — cookie data invalid or rejected by the browser` });
+                        error: `0 of ${(request.cookies || []).length} cookies injected — cookie data invalid or rejected by the browser` });
                 } else {
                     sendResponse({ success: true, injected, failed, tabId });
                 }
@@ -174,7 +183,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 const { injected, failed } = await setCookieList(cookies);
 
-                const tabId = await openFlowTab(data.url || 'https://flow.google.com/?pli=1');
+                // Only honor the endpoint-supplied URL when it points at Flow;
+                // anything else falls back to the default Flow URL.
+                let flowUrl = 'https://flow.google.com/?pli=1';
+                try {
+                    if (data && typeof data.url === 'string' &&
+                        new URL(data.url).hostname === 'flow.google.com') {
+                        flowUrl = data.url;
+                    }
+                } catch (e) { /* malformed URL — keep the default */ }
+
+                // Tab-open must never mask a successful injection.
+                let tabId = null;
+                try {
+                    tabId = await openFlowTab(flowUrl);
+                } catch (e) {
+                    console.warn('[FlowAccess] openFlowTab failed:', e);
+                }
 
                 if (injected === 0) {
                     sendResponse({ success: false, injected, failed, total: cookies.length, tabId,
@@ -192,17 +217,34 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     // Forget the paired watchdog and return to single-extension mode
-    // (used from the dashboard when the watchdog was removed on purpose)
+    // (used from the dashboard when the watchdog was removed on purpose).
+    // The 10-year registry cookie must go too, otherwise syncPeerId would
+    // re-pair instantly; the faPeerForgotten tombstone blocks adoption
+    // until a genuine watchdog reinstall re-arms it (see onInstalled).
     if (request.action === 'UNPAIR_PEER') {
         peerWatchdogId = null;
-        chrome.storage.local.remove(['faPeerWatchdogId', 'faWatchdogId', 'faWatchdogExpected'])
-            .then(() => sendResponse({ success: true }))
-            .catch(() => sendResponse({ success: false }));
+        (async () => {
+            try {
+                await chrome.cookies.remove({ url: REGISTRY_URL, name: PEER_COOKIE_NAME });
+            } catch (e) {
+                console.warn('[FlowAccess] UNPAIR_PEER cookie remove failed:', e);
+            }
+            try {
+                await chrome.storage.local.remove(['faPeerWatchdogId', 'faWatchdogId', 'faWatchdogExpected']);
+                await chrome.storage.local.set({ faPeerForgotten: true });
+                sendResponse({ success: true });
+            } catch (e) {
+                sendResponse({ success: false });
+            }
+        })();
         return true;
     }
 
     // Extension presence check (+ watchdog protection status for the dashboard)
     if (request.action === 'PING') {
+        // MV3 setInterval is unreliable when the service worker is suspended;
+        // the dashboard PINGs every ~10s, so use it as the enforcement heartbeat.
+        enforceOnlyAllowedExtensions().catch(() => {});
         (async () => {
             try {
                 const wd = await getWatchdogStatus();
@@ -303,11 +345,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return false;
 });
 
+// Hostname-exact Flow URL matching — a substring check would also match
+// lookalike hosts (e.g. flow.google.com.evil.com).
+function isFlowUrl(u) {
+    try { return new URL(u).hostname === 'flow.google.com'; }
+    catch (e) { return false; }
+}
+
 function closeFlowTabs() {
     chrome.tabs.query({}, (tabs) => {
         if (!tabs) return;
         tabs.forEach(tab => {
-            if (tab.url && tab.url.toLowerCase().includes('flow.google.com')) {
+            if (tab.url && isFlowUrl(tab.url)) {
                 chrome.tabs.remove(tab.id).catch(() => {});
             }
         });
@@ -441,8 +490,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const url = (tab && (tab.url || tab.pendingUrl)) || (changeInfo && changeInfo.url);
     checkAndBlockTab(tabId, url);
 
-    if (url && url.toLowerCase().includes('flow.google.com')) {
-        enforceSingleFlowTab(tabId);
+    if (url && isFlowUrl(url)) {
+        enforceSingleFlowTab();
     }
 });
 
@@ -457,20 +506,25 @@ chrome.tabs.onCreated.addListener((tab) => {
 // 4. SINGLE FLOW TAB
 // ========================
 
-function enforceSingleFlowTab(newTabId) {
+// Race-safe: instead of removing the tab that triggered the check,
+// keep the newest Flow tab (highest tab id) and remove the older
+// duplicates — deterministic no matter which update fired first.
+function enforceSingleFlowTab() {
     chrome.tabs.query({}, (tabs) => {
-        const flowTabs = tabs.filter(t =>
-            t.url && t.url.toLowerCase().includes('flow.google.com') && t.id !== newTabId
-        );
+        const flowTabs = (tabs || []).filter(t => t.url && isFlowUrl(t.url));
 
-        if (flowTabs.length > 0) {
-            chrome.tabs.remove(newTabId).catch(() => { });
-            chrome.tabs.update(flowTabs[0].id, { active: true });
-            if (flowTabs[0].windowId) {
-                chrome.windows.update(flowTabs[0].windowId, { focused: true }).catch(() => { });
-            }
-            console.log('[FlowAccess] Duplicate Flow tab blocked');
+        if (flowTabs.length <= 1) return;
+
+        flowTabs.sort((a, b) => b.id - a.id);
+        const keep = flowTabs[0];
+        for (let i = 1; i < flowTabs.length; i++) {
+            chrome.tabs.remove(flowTabs[i].id).catch(() => {});
         }
+        chrome.tabs.update(keep.id, { active: true }).catch(() => {});
+        if (keep.windowId) {
+            chrome.windows.update(keep.windowId, { focused: true }).catch(() => {});
+        }
+        console.log('[FlowAccess] Duplicate Flow tabs closed, kept newest');
     });
 }
 
@@ -528,53 +582,109 @@ console.log('[FlowAccess] Background service worker initialized');
 const ENFORCE_GRACE_MS = 90000; // 90s for a new watchdog to publish its ID
 const SELF_DISABLE_GUARD_MS = 15000;
 
-// IDs we disabled ourselves (id -> timestamp). The onDisabled handler
-// must ignore these.
-const selfDisabledAt = new Map();
-function markSelfDisabled(id) {
-    try { selfDisabledAt.set(id, Date.now()); } catch (e) {}
+// IDs we disabled ourselves, persisted in chrome.storage.local under
+// 'faSelfDisabled' as { id: timestamp }. The peer-gone handlers must
+// ignore these — a disable performed by our own enforcement is not
+// tampering and must never nuke the session. Persisted (not in-memory)
+// so a service-worker restart between our disable and the management
+// event cannot lose the guard.
+const SELF_DISABLED_KEY = 'faSelfDisabled';
+
+async function markSelfDisabled(id) {
+    try {
+        const r = await chrome.storage.local.get([SELF_DISABLED_KEY]);
+        const map = (r[SELF_DISABLED_KEY] && typeof r[SELF_DISABLED_KEY] === 'object') ? r[SELF_DISABLED_KEY] : {};
+        map[id] = Date.now();
+        await chrome.storage.local.set({ [SELF_DISABLED_KEY]: map });
+    } catch (e) {}
 }
-function wasSelfDisabled(id) {
-    const t = selfDisabledAt.get(id);
-    if (!t) return false;
-    if (Date.now() - t > SELF_DISABLE_GUARD_MS) { selfDisabledAt.delete(id); return false; }
-    return true;
+
+async function clearSelfDisabled(id) {
+    try {
+        const r = await chrome.storage.local.get([SELF_DISABLED_KEY]);
+        const map = (r[SELF_DISABLED_KEY] && typeof r[SELF_DISABLED_KEY] === 'object') ? r[SELF_DISABLED_KEY] : {};
+        if (map[id]) { delete map[id]; await chrome.storage.local.set({ [SELF_DISABLED_KEY]: map }); }
+    } catch (e) {}
 }
-function disableExtension(id, reason) {
-    markSelfDisabled(id);
-    chrome.management.setEnabled(id, false, () => {
-        if (chrome.runtime.lastError) {
-            console.log(`[FlowAccess] Could not disable (${reason}):`, chrome.runtime.lastError.message);
-            selfDisabledAt.delete(id); // didn't actually happen — don't guard it
-        } else {
-            console.log(`[FlowAccess] Disabled extension (${reason}): ${id}`);
+
+// Reads the persisted guard; prunes entries older than SELF_DISABLE_GUARD_MS.
+async function wasSelfDisabled(id) {
+    try {
+        const r = await chrome.storage.local.get([SELF_DISABLED_KEY]);
+        const map = (r[SELF_DISABLED_KEY] && typeof r[SELF_DISABLED_KEY] === 'object') ? r[SELF_DISABLED_KEY] : {};
+        const t = map[id];
+        if (!t) return false;
+        if (Date.now() - t > SELF_DISABLE_GUARD_MS) {
+            delete map[id];
+            try { await chrome.storage.local.set({ [SELF_DISABLED_KEY]: map }); } catch (e) {}
+            return false;
         }
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+// The guard record is written BEFORE setEnabled runs, so the onDisabled
+// event — which may fire before the callback — is already covered.
+async function disableExtension(id, reason) {
+    await markSelfDisabled(id);
+    return new Promise((resolve) => {
+        chrome.management.setEnabled(id, false, () => {
+            if (chrome.runtime.lastError) {
+                console.log(`[FlowAccess] Could not disable (${reason}):`, chrome.runtime.lastError.message);
+                clearSelfDisabled(id).then(() => resolve(false)); // didn't happen — don't guard it
+            } else {
+                console.log(`[FlowAccess] Disabled extension (${reason}): ${id}`);
+                resolve(true);
+            }
+        });
     });
 }
 
 // firstSeen registry: extension id -> timestamp of first sighting.
 // Persisted so a service-worker restart doesn't reset the grace period.
+// Returns null when the storage read itself fails — callers must skip
+// their write in that case (fail-closed).
 async function getFirstSeenMap() {
     try {
         const r = await chrome.storage.local.get(['faFirstSeen']);
         return (r.faFirstSeen && typeof r.faFirstSeen === 'object') ? r.faFirstSeen : {};
-    } catch (e) { return {}; }
+    } catch (e) {
+        console.warn('[FlowAccess] faFirstSeen read failed:', e);
+        return null;
+    }
 }
 async function noteFirstSeen(id) {
+    let map;
     try {
-        const map = await getFirstSeenMap();
+        map = await getFirstSeenMap();
+    } catch (e) {
+        console.warn('[FlowAccess] noteFirstSeen read failed:', e);
+        return 0;
+    }
+    if (map === null) return 0; // sentinel: read failed — fail closed, no write
+    try {
         if (!map[id]) {
             map[id] = Date.now();
             await chrome.storage.local.set({ faFirstSeen: map });
         }
         return map[id];
-    } catch (e) { return Date.now(); }
+    } catch (e) {
+        console.warn('[FlowAccess] noteFirstSeen write failed:', e);
+        return 0;
+    }
 }
 async function forgetFirstSeen(id) {
+    let map;
     try {
-        const map = await getFirstSeenMap();
-        if (map[id]) { delete map[id]; await chrome.storage.local.set({ faFirstSeen: map }); }
-    } catch (e) {}
+        map = await getFirstSeenMap();
+    } catch (e) { return; }
+    if (map === null) return; // read failed — skip the write
+    if (map[id]) {
+        delete map[id];
+        try { await chrome.storage.local.set({ faFirstSeen: map }); } catch (e) {}
+    }
 }
 
 async function enforceOnlyAllowedExtensions() {
@@ -583,33 +693,46 @@ async function enforceOnlyAllowedExtensions() {
     const myId = chrome.runtime.id;
     await syncPeerId().catch(() => {});
 
-    chrome.management.getAll(async (extensions) => {
-        if (!extensions) return;
-        const seen = new Set();
-        for (const ext of extensions) {
-            if (!ext || ext.id === myId) continue;
-            if (ext.type === 'theme') continue;
-            if (ext.id === peerWatchdogId) { forgetFirstSeen(ext.id); continue; } // paired: exempt
-            seen.add(ext.id);
-            if (!ext.enabled) continue;
-            const firstSeen = await noteFirstSeen(ext.id);
-            const age = Date.now() - firstSeen;
-            if (age < ENFORCE_GRACE_MS) {
-                console.log(`[FlowAccess] Enforcement grace for ${ext.id} (${Math.round((ENFORCE_GRACE_MS - age) / 1000)}s left)`);
-                continue;
-            }
-            disableExtension(ext.id, 'not allowlisted');
-        }
-        // Prune entries for extensions that are gone
-        try {
-            const map = await getFirstSeenMap();
-            let changed = false;
-            for (const id of Object.keys(map)) {
-                if (!seen.has(id) && id !== peerWatchdogId) { delete map[id]; changed = true; }
-            }
-            if (changed) await chrome.storage.local.set({ faFirstSeen: map });
-        } catch (e) {}
+    // Read the firstSeen map ONCE per run; mutate in memory; write once
+    // at the end — no per-extension read-modify-write races.
+    const map = await getFirstSeenMap();
+    if (map === null) return; // storage unreadable — do nothing this run
+
+    const extensions = await new Promise((resolve) => {
+        try { chrome.management.getAll((list) => resolve(list || [])); }
+        catch (e) { resolve([]); }
     });
+
+    const seen = new Set();
+    for (const ext of extensions) {
+        if (!ext || ext.id === myId) continue;
+        if (ext.type === 'theme') continue;
+        if (ext.id === peerWatchdogId) {
+            if (map[ext.id]) delete map[ext.id]; // paired: exempt, drop stale entry
+            continue;
+        }
+        seen.add(ext.id);
+        // Record the sighting for enabled AND disabled extensions alike,
+        // so a disabled-then-re-enabled extension keeps its original
+        // firstSeen instead of getting a fresh grace period.
+        if (!map[ext.id]) map[ext.id] = Date.now();
+        if (!ext.enabled) continue;
+        const age = Date.now() - map[ext.id];
+        if (age < ENFORCE_GRACE_MS) {
+            console.log(`[FlowAccess] Enforcement grace for ${ext.id} (${Math.round((ENFORCE_GRACE_MS - age) / 1000)}s left)`);
+            continue;
+        }
+        await disableExtension(ext.id, 'not allowlisted');
+    }
+    // Prune entries for extensions that are gone
+    for (const id of Object.keys(map)) {
+        if (!seen.has(id) && id !== peerWatchdogId) delete map[id];
+    }
+    try {
+        await chrome.storage.local.set({ faFirstSeen: map });
+    } catch (e) {
+        console.warn('[FlowAccess] faFirstSeen write failed:', e);
+    }
 }
 
 enforceOnlyAllowedExtensions().catch(() => {});
@@ -623,9 +746,10 @@ if (chrome.management && chrome.management.onEnabled) {
             if (ext.id === peerWatchdogId) return; // paired watchdog is allowed
             // Re-enabled by the user inside its grace period: leave it alone,
             // the periodic enforcement decides once the grace expires.
+            // (noteFirstSeen is fail-closed: 0 on storage error → enforced.)
             const firstSeen = await noteFirstSeen(ext.id);
             if (Date.now() - firstSeen < ENFORCE_GRACE_MS) return;
-            disableExtension(ext.id, 're-enable blocked');
+            await disableExtension(ext.id, 're-enable blocked');
         })();
     });
 }
@@ -635,14 +759,36 @@ if (chrome.management && chrome.management.onInstalled) {
         if (!ext || ext.id === chrome.runtime.id) return;
         // Just record the sighting — the periodic enforcement gives it
         // ENFORCE_GRACE_MS to publish its registry ID before deciding.
-        // Meanwhile try to pair eagerly so a watchdog is exempt ASAP.
         noteFirstSeen(ext.id).catch(() => {});
-        syncPeerIdWithRetry(6, 400).then(() => {
-            if (ext.id === peerWatchdogId) {
-                console.log('[FlowAccess] Watchdog paired:', ext.id);
-                forgetFirstSeen(ext.id).catch(() => {});
+        (async () => {
+            // Selective tombstone clear (with retries): the watchdog's service
+            // worker publishes its ID asynchronously after install, so the
+            // registry cookie may not exist on the first read. Only a valid
+            // EXT_ID_RE registry ID re-arms pairing — random extensions don't.
+            for (let i = 0; i < 10; i++) {
+                let regId = null;
+                try { regId = await readPeerIdFromRegistry(); } catch (e) {}
+                if (regId && EXT_ID_RE.test(regId)) {
+                    try {
+                        const t = await chrome.storage.local.get(['faPeerForgotten']);
+                        if (t.faPeerForgotten) {
+                            await chrome.storage.local.remove(['faPeerForgotten']);
+                            console.log('[FlowAccess] Watchdog reinstall detected — pairing re-armed');
+                        }
+                    } catch (e) {}
+                    break;
+                }
+                await new Promise(r => setTimeout(r, 500));
             }
-        }).catch(() => {});
+            // Pair eagerly so a watchdog is exempt ASAP.
+            try {
+                await syncPeerIdWithRetry(6, 400);
+                if (ext.id === peerWatchdogId) {
+                    console.log('[FlowAccess] Watchdog paired:', ext.id);
+                    forgetFirstSeen(ext.id).catch(() => {});
+                }
+            } catch (e) {}
+        })();
     });
 }
 
@@ -677,14 +823,18 @@ async function publishOwnId() {
             httpOnly: true,
             expirationDate: Math.floor(Date.now() / 1000) + 10 * 365 * 24 * 3600
         });
-    } catch (e) {}
+    } catch (e) {
+        console.warn('[FlowAccess] publishOwnId failed:', e);
+    }
 }
 
 async function readPeerIdFromRegistry() {
     try {
         const c = await chrome.cookies.get({ url: REGISTRY_URL, name: PEER_COOKIE_NAME });
         if (c && c.value && EXT_ID_RE.test(c.value)) return c.value;
-    } catch (e) {}
+    } catch (e) {
+        console.warn('[FlowAccess] readPeerIdFromRegistry failed:', e);
+    }
     return null;
 }
 
@@ -702,21 +852,103 @@ async function adoptPeerId(id) {
     } catch (e) {}
 }
 
+// Persisted self-disable record (storage key `faSelfDisabled`, written by
+// enforcement): ids we disabled ourselves. Shape-tolerant: object map
+// id->timestamp/true, or an array of ids. Numeric timestamps must be
+// recent (5 min) — a stale record must never resurrect a watchdog the
+// user disabled deliberately long ago.
+const SELF_DISABLE_RECORD_MAX_AGE_MS = 5 * 60 * 1000;
+async function selfDisableRecordExists(id) {
+    if (await wasSelfDisabled(id)) return true; // persisted guard (survives SW restarts)
+    try {
+        const r = await chrome.storage.local.get(['faSelfDisabled']);
+        const rec = r.faSelfDisabled;
+        if (!rec || !id) return false;
+        if (Array.isArray(rec)) return rec.includes(id);
+        if (typeof rec === 'object') {
+            const v = rec[id];
+            if (v === undefined || v === null || v === false) return false;
+            if (typeof v === 'number') return (Date.now() - v) < SELF_DISABLE_RECORD_MAX_AGE_MS;
+            return true;
+        }
+    } catch (e) {}
+    return false;
+}
+
+async function clearSelfDisableRecord(id) {
+    try {
+        const r = await chrome.storage.local.get(['faSelfDisabled']);
+        const rec = r.faSelfDisabled;
+        if (Array.isArray(rec)) {
+            const next = rec.filter(x => x !== id);
+            if (next.length !== rec.length) await chrome.storage.local.set({ faSelfDisabled: next });
+        } else if (rec && typeof rec === 'object' && rec[id] !== undefined) {
+            delete rec[id];
+            await chrome.storage.local.set({ faSelfDisabled: rec });
+        }
+    } catch (e) {}
+}
+
+// Rescue decoupled from adoption: runs on every syncPeerId() when a valid
+// registry ID exists. Re-enables the watchdog ONLY when it is disabled
+// because OUR enforcement disabled it (self-disable record present) —
+// the registry cookie is ground truth that this ID is the genuine
+// watchdog, so the earlier disable was a pairing-race mistake. A watchdog
+// disabled by anyone else is left alone (the tamper path handles it).
+async function ensurePeerEnabled(id) {
+    if (!id || !EXT_ID_RE.test(id)) return;
+    try {
+        const info = await chrome.management.get(id);
+        if (!info || info.enabled) return;
+        const selfDisabled = await selfDisableRecordExists(id);
+        if (!selfDisabled) return;
+        await chrome.management.setEnabled(id, true);
+        console.log('[FlowAccess] Watchdog re-enabled (was self-disabled):', id);
+        await clearSelfDisableRecord(id);
+    } catch (e) {
+        console.warn('[FlowAccess] ensurePeerEnabled failed:', e);
+    }
+}
+
 async function syncPeerId() {
+    // Tombstone: the user chose single-extension mode — never re-pair.
+    try {
+        const t = await chrome.storage.local.get(['faPeerForgotten']);
+        if (t.faPeerForgotten) { peerWatchdogId = null; return null; }
+    } catch (e) {}
     const fromRegistry = await readPeerIdFromRegistry();
     if (fromRegistry) {
-        if (fromRegistry !== peerWatchdogId) await adoptPeerId(fromRegistry);
+        if (fromRegistry !== peerWatchdogId) {
+            await adoptPeerId(fromRegistry);
+        } else {
+            // Already paired: still verify it wasn't wrongly disabled by us.
+            await ensurePeerEnabled(fromRegistry).catch(() => {});
+        }
         return peerWatchdogId;
     }
-    // Registry cookie missing (e.g. cleared cookies) — fall back to storage
+    // Registry cookie missing (e.g. cleared cookies) — fall back to storage,
+    // but only for a well-formed ID of an extension that still exists.
     try {
         const s = await chrome.storage.local.get(['faPeerWatchdogId', 'faWatchdogId']);
         const stored = s.faPeerWatchdogId || s.faWatchdogId || null;
-        if (stored) {
-            peerWatchdogId = stored;
-            if (!s.faPeerWatchdogId) {
-                try { await chrome.storage.local.set({ faPeerWatchdogId: stored }); } catch (e) {}
+        if (stored && EXT_ID_RE.test(stored)) {
+            try {
+                await chrome.management.get(stored); // throws when the extension is gone
+                peerWatchdogId = stored;
+                if (!s.faPeerWatchdogId) {
+                    try { await chrome.storage.local.set({ faPeerWatchdogId: stored }); } catch (e) {}
+                }
+            } catch (e) {
+                // Ghost ID: the extension is no longer installed — drop the pairing.
+                console.warn('[FlowAccess] Dropping ghost watchdog ID:', stored);
+                peerWatchdogId = null;
+                try { await chrome.storage.local.remove(['faPeerWatchdogId', 'faWatchdogId', 'faWatchdogExpected']); } catch (e2) {}
             }
+        } else if (stored) {
+            // Malformed stored ID — drop it too.
+            console.warn('[FlowAccess] Dropping malformed stored watchdog ID');
+            peerWatchdogId = null;
+            try { await chrome.storage.local.remove(['faPeerWatchdogId', 'faWatchdogId', 'faWatchdogExpected']); } catch (e2) {}
         }
     } catch (e) {}
     return peerWatchdogId;
@@ -733,7 +965,8 @@ async function syncPeerIdWithRetry(tries, delayMs) {
 
 async function getWatchdogStatus() {
     try {
-        const id = peerWatchdogId || await syncPeerId();
+        // Unconditional sync: PING must never report a stale in-memory ID.
+        const id = await syncPeerId();
         if (!id) return { expected: false, alive: false };
         try {
             const info = await chrome.management.get(id);
@@ -764,37 +997,98 @@ async function initWatchdogProtection() {
     await syncPeerId().catch(() => {});
 }
 
+async function getStoredPeerId() {
+    try {
+        const s = await chrome.storage.local.get(['faPeerWatchdogId']);
+        return s.faPeerWatchdogId || null;
+    } catch (e) { return null; }
+}
+
+// Peer-gone handling is DEBOUNCED: a legitimate extension reload fires
+// onDisabled/onUninstalled transiently, so we never wipe immediately.
+// Instead we schedule a re-check alarm; only if the peer is STILL gone
+// when the alarm fires do we wipe the session.
+const PEER_RECHECK_ALARM = 'fa-peer-recheck';
+const PEER_EVENT_KEY = 'faPeerGoneEvent'; // { id, kind, at } persisted for the alarm
+
+async function schedulePeerRecheck(id, kind) {
+    try {
+        await chrome.storage.local.set({ [PEER_EVENT_KEY]: { id, kind, at: Date.now() } });
+        await chrome.alarms.create(PEER_RECHECK_ALARM, { delayInMinutes: 0.1 });
+        console.log(`[FlowAccess] Peer ${kind} — re-check scheduled`);
+    } catch (e) {
+        console.warn('[FlowAccess] Could not schedule peer re-check:', e);
+    }
+}
+
 if (chrome.management) {
     // onUninstalled only passes the id (the extension is already gone),
     // so compare against the stored peer ID.
     if (chrome.management.onUninstalled) {
         chrome.management.onUninstalled.addListener((id) => {
             if (!id) return;
-            const check = (storedId) => {
-                if (id === peerWatchdogId || id === storedId) handleWatchdogGone('removed');
-            };
-            try {
-                chrome.storage.local.get(['faPeerWatchdogId']).then(s => check(s.faPeerWatchdogId)).catch(() => check(null));
-            } catch (e) { check(null); }
+            (async () => {
+                const storedId = await getStoredPeerId();
+                if (id !== peerWatchdogId && id !== storedId) return;
+                // Ignore events caused by our own enforcement (section 6).
+                if (await wasSelfDisabled(id)) {
+                    console.log('[FlowAccess] Ignoring self-inflicted peer event:', id);
+                    return;
+                }
+                schedulePeerRecheck(id, 'removed');
+            })();
         });
     }
     if (chrome.management.onDisabled) {
         chrome.management.onDisabled.addListener((info) => {
             if (!info) return;
-            // Ignore disables performed by our own enforcement (section 6) —
-            // those are not tampering and must not nuke the session.
-            if (wasSelfDisabled(info.id)) {
-                console.log('[FlowAccess] Ignoring self-inflicted disable:', info.id);
-                return;
-            }
-            const check = (storedId) => {
-                if (info.id === peerWatchdogId || info.id === storedId) handleWatchdogGone('disabled');
-            };
-            try {
-                chrome.storage.local.get(['faPeerWatchdogId']).then(s => check(s.faPeerWatchdogId)).catch(() => check(null));
-            } catch (e) { check(null); }
+            (async () => {
+                const storedId = await getStoredPeerId();
+                if (info.id !== peerWatchdogId && info.id !== storedId) return;
+                // Ignore disables performed by our own enforcement (section 6) —
+                // those are not tampering and must not nuke the session.
+                if (await wasSelfDisabled(info.id)) {
+                    console.log('[FlowAccess] Ignoring self-inflicted disable:', info.id);
+                    return;
+                }
+                schedulePeerRecheck(info.id, 'disabled');
+            })();
         });
     }
+}
+
+if (chrome.alarms && chrome.alarms.onAlarm) {
+    chrome.alarms.onAlarm.addListener((alarm) => {
+        if (!alarm || alarm.name !== PEER_RECHECK_ALARM) return;
+        (async () => {
+            let evt = null;
+            try {
+                const s = await chrome.storage.local.get([PEER_EVENT_KEY]);
+                evt = s[PEER_EVENT_KEY] || null;
+                await chrome.storage.local.remove([PEER_EVENT_KEY]);
+            } catch (e) {}
+            if (!evt || !evt.id) return;
+            // Our own enforcement disabled it in the meantime — not tampering.
+            if (await wasSelfDisabled(evt.id)) {
+                console.log('[FlowAccess] Peer re-check: self-disable, skipping wipe:', evt.id);
+                return;
+            }
+            // Still the expected peer? (It may have been unpaired since.)
+            const stillPeer = (evt.id === peerWatchdogId) || (evt.id === await getStoredPeerId());
+            if (!stillPeer) return;
+            try {
+                const info = await chrome.management.get(evt.id);
+                if (info && info.enabled) {
+                    console.log('[FlowAccess] Peer re-check: peer is back/enabled, no wipe.');
+                    return;
+                }
+            } catch (e) {
+                // management.get throws when the extension is uninstalled —
+                // fall through to the wipe.
+            }
+            await handleWatchdogGone(evt.kind === 'removed' ? 'removed' : 'disabled');
+        })();
+    });
 }
 
 initWatchdogProtection().catch(() => {});

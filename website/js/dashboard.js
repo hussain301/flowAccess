@@ -188,7 +188,9 @@ function setProtectionBadge(mode) {
 function verifyProtection() {
   return Promise.race([
     requestFromExtension('PING', {}),
-    new Promise(resolve => setTimeout(() => resolve({ success: false, error: 'timeout' }), 2500))
+    // 7s: MV3 service-worker cold starts routinely exceed 2.5s; a short
+    // timeout here produced false "extension not detected" states.
+    new Promise(resolve => setTimeout(() => resolve({ success: false, error: 'timeout' }), 7000))
   ]).then(res => {
     const mAlive = !!(res && res.installed === true);
     const wdExpected = !!(res && res.watchdogExpected);
@@ -202,9 +204,19 @@ function verifyProtection() {
   });
 }
 
+// Consecutive-failure counters for the liveness monitor. A single failed
+// PING can be an MV3 service-worker cold start or a bridge hiccup —
+// removal handlers only fire after 2 consecutive failures. Counters reset
+// on any successful PING.
+let mainGoneStreak = 0;
+let watchdogGoneStreak = 0;
+let mainRemovalFired = false;
+let watchdogRemovalFired = false;
+
 async function monitorExtension() {
   const p = await verifyProtection();
   const prevMain = mainAlive;
+  const prevWatchdogExpected = watchdogExpected;
   const prevWdOk = !watchdogExpected || watchdogAlive;
 
   mainAlive = p.mainAlive;
@@ -212,23 +224,43 @@ async function monitorExtension() {
   watchdogAlive = p.watchdogAlive;
   const wdOk = !watchdogExpected || watchdogAlive;
 
-  if (mainAlive !== prevMain) {
-    if (mainAlive) {
-      // Restored (rare on the same page — content scripts don't
-      // re-inject until reload — but handle it anyway)
-      mainConfirmedOnce = true;
-      setExtensionReady();
-    } else if (mainConfirmedOnce) {
-      onMainRemoved();
-    } else {
-      isExtensionReady = false;
-      setProtectionBadge('no-extension');
-      updateButtonStates();
-    }
+  // Any successful PING resets the failure streaks (and re-arms removal)
+  if (mainAlive) { mainGoneStreak = 0; mainRemovalFired = false; }
+  if (wdOk) { watchdogGoneStreak = 0; watchdogRemovalFired = false; }
+
+  if (mainAlive && !prevMain) {
+    // Restored (rare on the same page — content scripts don't
+    // re-inject until reload — but handle it anyway)
+    mainConfirmedOnce = true;
+    setExtensionReady();
+    updateButtonStates();
     return;
   }
-  if (!wdOk && prevWdOk) { onWatchdogRemoved(); return; }
-  if (wdOk && !prevWdOk) { onWatchdogRestored(); return; }
+  if (!mainAlive && mainConfirmedOnce && !mainRemovalFired) {
+    mainGoneStreak++;
+    if (mainGoneStreak >= 2) {
+      mainRemovalFired = true;
+      onMainRemoved(prevWatchdogExpected);
+      return;
+    }
+  }
+  if (!mainAlive && !mainConfirmedOnce) {
+    isExtensionReady = false;
+    setProtectionBadge('no-extension');
+    updateButtonStates();
+    return;
+  }
+  if (!wdOk && !watchdogRemovalFired) {
+    watchdogGoneStreak++;
+    if (watchdogGoneStreak >= 2) {
+      watchdogRemovalFired = true;
+      onWatchdogRemoved();
+      return;
+    }
+  }
+  // Only announce a watchdog restore when a removal was actually fired —
+  // otherwise a single blip would produce a spurious "restored" toast.
+  if (wdOk && !prevWdOk && watchdogRemovalFired) { onWatchdogRestored(); return; }
   updateButtonStates();
 }
 
@@ -257,19 +289,22 @@ async function autoPauseSession(reason) {
   }
 }
 
-async function onMainRemoved() {
+async function onMainRemoved(wasWatchdogExpected) {
   isExtensionReady = false;
   setProtectionBadge('no-extension');
-  // The watchdog extension performs the cookie wipe + Flow tab close.
-  // Here we freeze the session server-side so no time accrues and
-  // Resume stays blocked until the extension is back.
+  // The watchdog companion performs the cookie wipe + Flow tab close —
+  // but ONLY in watchdog mode. In single-extension mode nothing wipes,
+  // the session is just frozen server-side, so say so honestly.
+  const wiped = !!wasWatchdogExpected;
   await autoPauseSession('extension_removed');
   updateButtonStates();
   if (currentSessionId) {
     showProtectionOverlay({
       emoji: '🧩',
       title: 'Extension Removed',
-      body: 'The FlowAccess extension was removed or disabled. The shared session has been <b>wiped and paused</b>.',
+      body: wiped
+        ? 'The FlowAccess extension was removed or disabled. The shared session has been <b>wiped and paused</b>.'
+        : 'The FlowAccess extension was removed or disabled. The session has been <b>paused</b> — nothing was wiped automatically, so please close your Flow tab manually.',
       note: 'Re-install / re-enable the extension, then reload this page and press Resume.'
     });
   } else {
@@ -413,6 +448,10 @@ async function loadUsageData() {
     });
     sessions.sort((a, b) => b.startMs - a.startMs);
     
+    // Sessions are newest-first — only the NEWEST Paused session may
+    // claim currentSessionId (previously every Paused iteration
+    // overwrote it, ending on the OLDEST).
+    let foundPausedSession = false;
     sessions.forEach(({ id, data }) => {
       let durationMs = data.durationMs || 0;
 
@@ -432,8 +471,9 @@ async function loadUsageData() {
         }
       }
       
-      // Paused session — show paused state
-      if (data.status === 'Paused') {
+      // Paused session — show paused state (newest one wins)
+      if (data.status === 'Paused' && !foundPausedSession) {
+        foundPausedSession = true;
         currentSessionId = id;
         isPaused = true;
       }
