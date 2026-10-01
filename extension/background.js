@@ -53,7 +53,41 @@ function toCookieDetails(c) {
         details.expirationDate = c.expirationDate;
     }
 
+    // CHIPS (partitioned) cookies: preserve the partition key when the
+    // stored cookie has one — otherwise Google receives a different
+    // cookie than the session was captured with.
+    if (c.partitionKey && typeof c.partitionKey.topLevelSite === 'string' && c.partitionKey.topLevelSite) {
+        details.partitionKey = { topLevelSite: c.partitionKey.topLevelSite };
+    }
+
     return details;
+}
+
+// Drop duplicate (name, domain, path) entries from the incoming set —
+// keep the LAST occurrence. A captured set can contain the same cookie
+// twice with different values; injecting both leaves an order-dependent
+// mix, which is exactly what triggers Google's CookieMismatch page.
+function dedupeCookies(cookies) {
+    const seen = new Map();
+    for (const c of (Array.isArray(cookies) ? cookies : [])) {
+        if (!c || typeof c.name !== 'string') continue;
+        const d = String(c.domain || '.google.com').toLowerCase().replace(/^\./, '');
+        const p = typeof c.path === 'string' && c.path ? c.path : '/';
+        seen.set(`${c.name}\n${d}\n${p}`, c);
+    }
+    return [...seen.values()];
+}
+
+// Index an incoming cookie set by name+domain+path -> value, for the
+// value-aware backup below.
+function indexCookieValues(cookies) {
+    const map = new Map();
+    for (const c of dedupeCookies(cookies)) {
+        const d = String(c.domain || '.google.com').toLowerCase().replace(/^\./, '');
+        const p = typeof c.path === 'string' && c.path ? c.path : '/';
+        map.set(`${c.name}\n${d}\n${p}`, String(c.value));
+    }
+    return map;
 }
 
 /**
@@ -66,27 +100,34 @@ async function setCookieList(cookies) {
     // Google's CookieMismatch page.
     await backupAndClearGoogleCookies(cookies);
     let injected = 0, failed = 0;
+    const failedNames = [];
     const injectedDetails = [];
-    const list = Array.isArray(cookies) ? cookies.slice(0, 500) : [];
+    const list = dedupeCookies(cookies).slice(0, 500);
     for (const c of list) {
         try {
             const details = toCookieDetails(c);
             if (!details) { failed++; continue; }
             // chrome.cookies.set resolves to null (no throw) when the
             // browser refuses the cookie — only count truthy results.
-            const setResult = await chrome.cookies.set(details);
+            let setResult = await chrome.cookies.set(details);
+            if (!setResult) {
+                // One retry — a cold cookie store can refuse the first set.
+                try { setResult = await chrome.cookies.set(details); } catch (e) {}
+            }
             if (setResult) {
                 injected++;
                 injectedDetails.push({ name: details.name, url: details.url });
             } else {
                 failed++;
-                console.warn(`[FlowAccess] Cookie refused (null result): ${details.name} on ${details.domain}`);
+                failedNames.push(`${details.name}@${details.domain}`);
             }
         } catch (err) {
             console.warn(`[FlowAccess] Cookie set error for ${c && c.name}:`, err);
             failed++;
+            failedNames.push(`${c && c.name}@?`);
         }
     }
+    if (failedNames.length) console.warn('[FlowAccess] Refused cookies:', failedNames.slice(0, 20).join(', '));
     // Single write — tracks exactly the cookies of this injection.
     await resetInjectedCookies(injectedDetails);
     console.log(`[FlowAccess] Injected ${injected} cookies, ${failed} failed`);
@@ -266,9 +307,24 @@ async function backupAndClearGoogleCookies(cookies) {
     const scope = scopeSuffixesFor(cookies);
     const existing = await getCookieBackup();
     if (!existing.length) {
+        // A jar cookie matching an incoming cookie on name+domain+path
+        // WITH THE SAME VALUE is leftover from a previous injection — not
+        // the user's cookie — so it is excluded from the backup (the wipe
+        // below deletes it). A same-key cookie with a DIFFERENT value is
+        // the user's own login and IS backed up. This makes the flow
+        // fully automatic: no manual cookie deletion is ever needed and
+        // the user never notices anything.
+        const incomingValues = indexCookieValues(cookies);
         let all = [];
         try { all = await chrome.cookies.getAll({}) || []; } catch (e) { all = []; }
-        const targets = all.filter(c => isScopedCookie(c, scope));
+        const targets = all.filter(c => {
+            if (!isScopedCookie(c, scope)) return false;
+            const d = String(c.domain || '').toLowerCase().replace(/^\./, '');
+            const p = c.path || '/';
+            const key = `${c.name}\n${d}\n${p}`;
+            if (incomingValues.has(key) && incomingValues.get(key) === String(c.value)) return false;
+            return true;
+        });
         const backup = targets.map(cookieToSetDetails);
         try {
             await chrome.storage.local.set({ [FA_COOKIE_BACKUP_KEY]: backup });
