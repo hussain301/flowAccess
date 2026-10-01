@@ -433,7 +433,15 @@ function showVerifyEmailOverlay(email) {
       await resendVerificationEmail();
       showToast('Verification email sent. Check your inbox.', 'success');
     } catch (err) { showToast(err.message || 'Could not resend email.', 'error'); }
-    btn.disabled = false; btn.innerText = '↻ Resend email';
+    // 60s cooldown — hammering resend gets Firebase to rate-limit the address.
+    let s = 60;
+    const tick = () => {
+      if (s <= 0) { btn.disabled = false; btn.innerText = '↻ Resend email'; return; }
+      btn.innerText = `↻ Resend email (${s}s)`;
+      s--;
+      setTimeout(tick, 1000);
+    };
+    tick();
   });
   verifyEmailOverlay.querySelector('#fa-verify-done').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
