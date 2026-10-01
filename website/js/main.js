@@ -89,7 +89,7 @@ registerForm.addEventListener('submit', async (e) => {
   
   try {
     await registerUser(name, email, password);
-    showToast('Registration successful!', 'success');
+    showToast('Account created! Verification email sent — check your inbox.', 'success');
   } catch (error) {
     showToast(error.message, 'error');
     btn.disabled = false;

@@ -1,5 +1,5 @@
 import { auth, db } from './firebase-config.js';
-import { logoutUser, onAuthChange } from './auth.js';
+import { logoutUser, onAuthChange, resendVerificationEmail } from './auth.js';
 import { decryptCookies } from './cookie-crypto.js';
 import { 
   collection, query, where, getDocs, doc, setDoc, addDoc, updateDoc, 
@@ -49,6 +49,14 @@ onAuthChange(async (user) => {
   }
   currentUser = user;
   userEmailEl.innerText = user.email;
+
+  // Email must be verified (Gmail link, free via Firebase) before
+  // anything session-related loads.
+  if (!user.emailVerified) {
+    showVerifyEmailOverlay(user.email);
+    return;
+  }
+  hideVerifyEmailOverlay();
   
   try {
     const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -356,6 +364,49 @@ function showProtectionOverlay({ emoji, title, body, note }) {
 
 function hideProtectionOverlay() {
   if (protectionOverlay) { protectionOverlay.remove(); protectionOverlay = null; }
+}
+
+// === EMAIL VERIFICATION GATE (Gmail link, free via Firebase) ===
+let verifyEmailOverlay = null;
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+function showVerifyEmailOverlay(email) {
+  hideVerifyEmailOverlay();
+  verifyEmailOverlay = document.createElement('div');
+  verifyEmailOverlay.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.78);backdrop-filter:blur(4px);';
+  verifyEmailOverlay.innerHTML = `
+    <div style="background:#1f2937;color:#f9fafb;border:1px solid #374151;border-radius:16px;padding:32px 36px;max-width:440px;margin:16px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:inherit;">
+      <div style="font-size:44px;margin-bottom:12px;">📧</div>
+      <h2 style="margin:0 0 10px;font-size:20px;">Verify your email</h2>
+      <p style="margin:0 0 8px;color:#d1d5db;font-size:14px;line-height:1.6;">We sent a verification link to<br><b>${escHtml(email)}</b>.<br>Click it, then come back here.</p>
+      <p style="margin:0 0 20px;color:#9ca3af;font-size:13px;line-height:1.6;">Sessions stay locked until your Gmail is verified.</p>
+      <button id="fa-verify-resend" style="background:#3b82f6;color:#fff;border:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;margin-right:8px;">↻ Resend email</button>
+      <button id="fa-verify-done" style="background:#10b981;color:#fff;border:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;">✓ I've verified</button>
+    </div>`;
+  document.body.appendChild(verifyEmailOverlay);
+  verifyEmailOverlay.querySelector('#fa-verify-resend').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.innerText = 'Sending...';
+    try {
+      await resendVerificationEmail();
+      showToast('Verification email sent. Check your inbox.', 'success');
+    } catch (err) { showToast(err.message || 'Could not resend email.', 'error'); }
+    btn.disabled = false; btn.innerText = '↻ Resend email';
+  });
+  verifyEmailOverlay.querySelector('#fa-verify-done').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.innerText = 'Checking...';
+    try {
+      await currentUser.reload();
+      if (currentUser.emailVerified) { location.reload(); return; }
+      showToast('Not verified yet — click the link in your inbox first.', 'error');
+    } catch (err) { showToast('Could not check. Try again.', 'error'); }
+    btn.disabled = false; btn.innerText = "✓ I've verified";
+  });
+}
+function hideVerifyEmailOverlay() {
+  if (verifyEmailOverlay) { verifyEmailOverlay.remove(); verifyEmailOverlay = null; }
 }
 
 // === LOAD ACTIVE ACCESS CONFIG ===

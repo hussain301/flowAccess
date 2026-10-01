@@ -14,6 +14,11 @@ service cloud.firestore {
              get(/databases/$(database)/documents/config/admin).data.adminEmails;
     }
 
+    // Helper: email verified via Firebase link (admins bypass)
+    function isVerified() {
+      return isAuth() && (request.auth.token.email_verified == true || isAdmin());
+    }
+
     // Users collection — users can read own data, admin can read/write all
     match /users/{userId} {
       allow read: if isAuth() && (request.auth.uid == userId || isAdmin());
@@ -22,10 +27,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // Sessions — users can read own, admin can read all
+    // Sessions — users can read own, admin can read all.
+    // Only verified emails (or admin) may create sessions.
     match /sessions/{sessionId} {
       allow read: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow create: if isVerified() && request.resource.data.userId == request.auth.uid;
       allow update: if isAuth() && (resource.data.userId == request.auth.uid || isAdmin());
       allow delete: if isAdmin();
     }
