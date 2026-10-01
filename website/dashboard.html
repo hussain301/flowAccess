@@ -3,6 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script>
+  /* Auth gate: runs before anything else (no imports, no modules).
+     If no Firebase session exists in this browser, the dashboard must not
+     open at all — bounce straight back to login. */
+  (function () {
+    function hasFirebaseSession() {
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (k && k.indexOf('firebase:authUser:') === 0) return true;
+        }
+        return false;
+      } catch (e) { return null; } // storage blocked — let the app module decide
+    }
+    if (hasFirebaseSession() === false) {
+      window.location.replace('index.html');
+    }
+  })();
+  </script>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
