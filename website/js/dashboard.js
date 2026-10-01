@@ -198,8 +198,8 @@ function setExtensionReady() {
 
 // Badge modes: 'ready' | 'no-extension' | 'no-watchdog'
 // Direct-download ZIPs (GitHub Releases) offered when an extension is missing.
-const FA_TOOL_ZIP_URL = 'https://github.com/hussain301/flowaccess-extension/releases/download/tool-v1.4/flowaccess-tool-v1.4.zip';
-const FA_PRO_ZIP_URL = 'https://github.com/hussain301/flowaccess-extension/releases/download/watchdog-v1.1.0/flowaccess-watchdog-v1.1.0.zip';
+const FA_TOOL_ZIP_URL = 'https://github.com/hussain301/flowaccess-extension/releases/download/tool-v1.4.3/flowaccess-tool-v1.4.3.zip';
+const FA_PRO_ZIP_URL = 'https://github.com/hussain301/flowaccess-extension/releases/download/watchdog-v1.1.1/flowaccess-watchdog-v1.1.1.zip';
 function setProtectionBadge(mode) {
   const icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">';
   if (mode === 'ready') {
