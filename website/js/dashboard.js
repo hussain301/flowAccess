@@ -104,6 +104,7 @@ onAuthChange(async (user) => {
     if (userDoc.exists()) {
       const userData = userDoc.data();
       userNameEl.innerText = friendlyName(userData.displayName, user.email);
+      userNameEl.classList.remove('skeleton', 'skel-line');
       
       // Ban check
       if (userData.isBanned) {
@@ -112,14 +113,23 @@ onAuthChange(async (user) => {
         return;
       }
       
-      // Per-user time limit from admin
-      const timeLimitMin = userData.timeLimitMinutes || 180;
+      // Time limit: per-user override > global admin default > 180 min fallback
+      let globalLimitMin = 180;
+      try {
+        const gsSnap = await getDoc(doc(db, 'config', 'settings'));
+        if (gsSnap.exists() && gsSnap.data().defaultTimeLimitMinutes) {
+          globalLimitMin = parseInt(gsSnap.data().defaultTimeLimitMinutes, 10) || 180;
+        }
+      } catch (e) {
+        console.warn('Could not load global settings, using 180 min:', e.message);
+      }
+      const timeLimitMin = userData.timeLimitMinutes || globalLimitMin;
       maxTimeMs = timeLimitMin * 60 * 1000;
       remainingTimeMs = maxTimeMs;
       updateTimerUI();
-      
+
       // Show limit info
-      const timerLabel = document.querySelector('.timer-container p');
+      const timerLabel = document.getElementById('timerLimitLabel');
       if (timerLabel) timerLabel.textContent = `Remaining time (${timeLimitMin} min limit per 24hr)`;
     }
   } catch(e) {
@@ -726,7 +736,7 @@ function isSlotOccupied(data, now) {
   if (st !== 'Active' && st !== 'Paused') return false;
   if (st === 'Active') return !isSessionStale(data, now);
   const pMs = data.pausedAt && data.pausedAt.toMillis ? data.pausedAt.toMillis() : 0;
-  return pMs ? (now.getTime() - pMs) < DEFAULT_TIME_MS : true;
+  return pMs ? (now.getTime() - pMs) < maxTimeMs : true;
 }
 
 function alreadyActiveError() {
@@ -867,6 +877,7 @@ function formatTime(ms) {
 }
 
 function updateTimerUI() {
+  timeRemainingEl.classList.remove('skeleton');
   timeRemainingEl.innerText = formatTime(remainingTimeMs);
   const percent = Math.max(0, Math.min(100, (remainingTimeMs / maxTimeMs) * 100));
   const offset = 282.74 - (percent / 100) * 282.74;

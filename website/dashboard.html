@@ -26,6 +26,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
   <title>Dashboard - FlowAccess</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./css/styles.css">
   <style>
@@ -95,7 +96,7 @@
       <div class="sidebar">
         <div class="glass-card dash-card">
           <h2>Welcome</h2>
-          <p>Hello, <strong id="userName">User</strong>!</p>
+          <p>Hello, <strong id="userName" class="skeleton skel-line" style="display:inline-block;min-width:110px;">&nbsp;</strong>!</p>
           <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.5rem;">Manage your FlowAccess sessions here.</p>
         </div>
 
@@ -103,7 +104,7 @@
           <h2>Extension Status</h2>
           <div id="extensionStatus">
             <!-- Dynamic Content -->
-            <p style="color: var(--text-muted);">Checking...</p>
+            <div class="skeleton skel-block" style="height:3.2rem;">&nbsp;</div>
           </div>
         </div>
 
@@ -123,23 +124,24 @@
 
       <div class="main-content">
         <div class="glass-card dash-card">
-          <h2>Session Timer (3hr / 24hr)</h2>
+          <h2>Session Timer</h2>
           <div class="timer-container">
             <div class="circular-progress">
               <svg>
                 <circle class="progress-bg" cx="75" cy="75" r="45"></circle>
                 <circle id="progressCircle" class="progress-value" cx="75" cy="75" r="45"></circle>
               </svg>
-              <div id="timeRemaining" class="time-text">03:00:00</div>
+              <div id="timeRemaining" class="time-text skeleton" style="min-width:7rem;">&nbsp;</div>
             </div>
-            <p style="color: var(--text-muted);">Remaining time for today</p>
+            <p id="timerLimitLabel" style="color: var(--text-muted);"><span class="skeleton skel-line" style="display:inline-block;min-width:180px;">&nbsp;</span></p>
           </div>
         </div>
 
         <div class="glass-card dash-card">
           <h2>My Projects <span id="savedProjectsCount" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 400;">0/3</span></h2>
           <div id="savedProjectsList">
-            <p style="color: var(--text-muted); font-size: 0.875rem;">Loading...</p>
+            <div class="skeleton skel-block" style="height:2.6rem;margin-bottom:0.5rem;">&nbsp;</div>
+            <div class="skeleton skel-block" style="height:2.6rem;">&nbsp;</div>
           </div>
           <a id="newProjectBtn" class="btn" href="https://flow.google.com/" target="_blank" rel="noopener" style="width: 100%; padding: 0.75rem; margin-top: 0.75rem; background: #6366f1; color: #fff; font-weight: 700;">
             ＋ New Project
@@ -159,7 +161,8 @@
                 </tr>
               </thead>
               <tbody id="historyTableBody">
-                <tr><td colspan="3" class="text-center">Loading...</td></tr>
+                <tr><td colspan="3"><div class="skeleton skel-block" style="height:2.2rem;">&nbsp;</div></td></tr>
+                <tr><td colspan="3"><div class="skeleton skel-block" style="height:2.2rem;">&nbsp;</div></td></tr>
               </tbody>
             </table>
           </div>

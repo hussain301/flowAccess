@@ -125,6 +125,7 @@
         <button class="nav-item" onclick="showView('endpoints')">🔗 Endpoints</button>
         <button class="nav-item" onclick="showView('cookies')">🍪 Cookie Sets</button>
         <button class="nav-item" onclick="showView('sessions')">⏱️ Sessions</button>
+        <button class="nav-item" onclick="showView('settings');loadSettings()">⚙️ Settings</button>
       </nav>
       <div class="sidebar-footer">
         <div class="email" id="adminEmail">admin</div>
@@ -209,6 +210,20 @@
         <div class="table-card">
           <table><thead><tr><th>User</th><th>Start</th><th>End</th><th>Duration</th><th>Status</th></tr></thead>
           <tbody id="sessionsBody"><tr><td colspan="5" style="color:var(--muted);text-align:center;">Loading...</td></tr></tbody></table>
+        </div>
+      </div>
+      <!-- SETTINGS -->
+      <div id="view-settings" class="hidden">
+        <div class="view-header"><h1>General Settings</h1></div>
+        <div class="table-card" style="max-width:560px;padding:1.5rem;">
+          <h3 style="margin-bottom:0.5rem;">⏱️ Default Daily Time Limit</h3>
+          <p style="color:var(--muted);font-size:0.85rem;margin-bottom:1rem;">Applies to <strong>all users</strong> who don't have an individual limit set (Users tab → per-user override still wins).</p>
+          <div class="form-group">
+            <label>Time limit (minutes per 24h)</label>
+            <input type="number" id="setTimeLimit" min="1" max="1440" step="1" value="180" style="max-width:200px;">
+          </div>
+          <button class="btn btn-primary" onclick="saveSettings()">💾 Save Settings</button>
+          <span id="settingsMsg" style="margin-left:0.75rem;font-size:0.85rem;"></span>
         </div>
       </div>
     </main>
@@ -818,6 +833,32 @@ async function loadSessions() {
   } catch(e) { console.error('Sessions error:', e); }
 }
 window.loadSessions = loadSessions;
+
+// --- General Settings ---
+async function loadSettings() {
+  try {
+    const snap = await getDoc(doc(db, 'config', 'settings'));
+    if (snap.exists() && snap.data().defaultTimeLimitMinutes) {
+      $('setTimeLimit').value = snap.data().defaultTimeLimitMinutes;
+    }
+  } catch(e) { console.error('Load settings error:', e); }
+}
+window.loadSettings = loadSettings;
+
+window.saveSettings = async () => {
+  const mins = parseInt($('setTimeLimit').value, 10);
+  const msg = $('settingsMsg');
+  if (!mins || mins < 1 || mins > 1440) { msg.textContent = '⚠️ Enter 1–1440 minutes.'; msg.style.color = 'var(--error, #ef4444)'; return; }
+  try {
+    await setDoc(doc(db, 'config', 'settings'), { defaultTimeLimitMinutes: mins, updatedAt: serverTimestamp() }, { merge: true });
+    msg.textContent = '✅ Saved — applies to all users.';
+    msg.style.color = 'var(--success, #10b981)';
+    toast('✅ Settings saved', 'success');
+  } catch(e) {
+    msg.textContent = '❌ ' + e.message;
+    msg.style.color = 'var(--error, #ef4444)';
+  }
+};
 </script>
 </body>
 </html>

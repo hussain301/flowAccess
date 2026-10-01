@@ -55,6 +55,12 @@ service cloud.firestore {
       allow read: if isAuth();
       allow write: if isAdmin();
     }
+    // Global settings (e.g. default daily time limit) — every signed-in
+    // user may read so the dashboard can apply the admin's default.
+    match /config/settings {
+      allow read: if isAuth();
+      allow write: if isAdmin();
+    }
     match /config/{docId} {
       allow read: if isAdmin();
       allow write: if isAdmin();

@@ -3,14 +3,54 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FlowAccess - Free Google Flow Access</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- SEO -->
+  <title>FlowAccess — Free Google Flow AI Access | Veo 3.1 Video Generation</title>
+  <meta name="description" content="FlowAccess gives you free access to Google Flow AI — create stunning AI videos with Veo 3.1, manage daily sessions with a smart timer, and keep your data safe with isolated Chrome profiles.">
+  <meta name="keywords" content="google flow, flow ai, google flow ai, veo 3, veo 3.1, veo 3.1 lite, free flow access, flowaccess, ai video generation, google labs flow, text to video ai, flow tv">
+  <meta name="author" content="FlowAccess">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://flowaccess-phi.vercel.app/">
+  <meta name="theme-color" content="#0b0b14">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="FlowAccess">
+  <meta property="og:title" content="FlowAccess — Free Google Flow AI Access">
+  <meta property="og:description" content="Free access to Google Flow AI with Veo 3.1 video generation, smart daily session timer and secure isolated profiles.">
+  <meta property="og:url" content="https://flowaccess-phi.vercel.app/">
+  <meta property="og:image" content="https://flowaccess-phi.vercel.app/favicon.svg">
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="FlowAccess — Free Google Flow AI Access">
+  <meta name="twitter:description" content="Free Google Flow AI access with Veo 3.1, smart session timer and secure Chrome profiles.">
+
+  <!-- Structured data -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "FlowAccess",
+    "url": "https://flowaccess-phi.vercel.app/",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "Chrome",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+    "description": "Free access to Google Flow AI with Veo 3.1 video generation, smart daily session timer and secure isolated browser profiles."
+  }
+  </script>
+
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./css/styles.css">
 </head>
 <body>
   <div class="bg-animation">
     <div class="orb orb-1"></div>
     <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
   </div>
 
   <div id="toastContainer" class="toast-container"></div>
@@ -23,89 +63,250 @@
     </div>
   </div>
 
-  <div class="container">
-    <header>
-      <a href="#" class="logo">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+  <!-- NAV -->
+  <header class="site-nav">
+    <div class="container nav-inner">
+      <a href="#top" class="logo">
+        <img src="./favicon.svg" alt="FlowAccess logo" width="28" height="28">
         Flow<span>Access</span>
       </a>
       <nav class="nav-links">
-        <a href="#">Home</a>
         <a href="#features">Features</a>
-        <a href="#auth">Login</a>
+        <a href="#how">How it works</a>
+        <a href="#extensions">Extensions</a>
+        <a href="#faq">FAQ</a>
       </nav>
-    </header>
+      <a href="#auth" class="btn btn-primary btn-sm">Login</a>
+    </div>
+  </header>
 
-    <main>
-      <section class="hero">
-        <h1>Free Google Flow Access</h1>
-        <p>Unlock premium capabilities with our secure platform. Start your session today.</p>
-        <a href="#auth" class="btn btn-primary">Get Started</a>
-      </section>
-
-      <section id="features" class="features">
-        <div class="glass-card feature-card">
-          <h3>Free Access</h3>
-          <p>Gain access to powerful features completely free. No hidden fees or subscriptions required.</p>
+  <main id="top">
+    <!-- HERO -->
+    <section class="hero hero-lg">
+      <div class="container">
+        <div class="hero-badge">✨ Free access to Google Flow AI</div>
+        <h1>Create stunning AI videos with <span class="grad">Google Flow</span></h1>
+        <p class="hero-sub">FlowAccess unlocks Google Flow AI — including <strong>Veo 3.1</strong> video generation — right in your browser. Free daily sessions, a smart timer, and isolated profiles that keep your own Google account untouched.</p>
+        <div class="hero-cta">
+          <a href="#auth" class="btn btn-primary btn-lg">Get Started Free</a>
+          <a href="#extensions" class="btn btn-ghost btn-lg">⬇️ Get the Extension</a>
         </div>
-        <div class="glass-card feature-card">
-          <h3>Session Timer</h3>
-          <p>Enjoy up to 3 hours of usage per 24-hour period. Our smart timer keeps track automatically.</p>
+        <div class="hero-stats">
+          <div class="hstat"><strong>100%</strong><span>Free forever</span></div>
+          <div class="hstat"><strong>Veo 3.1</strong><span>AI video model</span></div>
+          <div class="hstat"><strong>Daily</strong><span>Smart session timer</span></div>
         </div>
-        <div class="glass-card feature-card">
-          <h3>Secure & Private</h3>
-          <p>We prioritize your privacy. Isolated browser profiles ensure your main data stays untouched.</p>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features" class="section">
+      <div class="container">
+        <div class="section-head">
+          <h2>Everything you need to create with <span class="grad">Flow AI</span></h2>
+          <p>One lightweight setup — browser extension plus dashboard — and you're generating.</p>
         </div>
-      </section>
-
-      <section id="auth" class="auth-section glass-card">
-        <div class="auth-tabs">
-          <div id="loginTab" class="auth-tab active">Login</div>
-          <div id="registerTab" class="auth-tab">Register</div>
+        <div class="grid-3">
+          <div class="glass-card feature-card">
+            <div class="f-ico">🎬</div>
+            <h3>Google Flow Access</h3>
+            <p>Full access to Google's Flow AI filmmaking tool — prompts, scenes and takes, without paying for access.</p>
+          </div>
+          <div class="glass-card feature-card">
+            <div class="f-ico">🤖</div>
+            <h3>Veo 3.1 Generation</h3>
+            <p>Generate cinematic AI video with Veo 3.1 — Google's latest text-to-video model, ready out of the box.</p>
+          </div>
+          <div class="glass-card feature-card">
+            <div class="f-ico">⏱️</div>
+            <h3>Smart Session Timer</h3>
+            <p>Your daily usage is tracked automatically with pause and resume — never lose track of remaining time.</p>
+          </div>
+          <div class="glass-card feature-card">
+            <div class="f-ico">🛡️</div>
+            <h3>Isolated Profiles</h3>
+            <p>Runs in a separate Chrome profile so your personal Google account and data stay completely untouched.</p>
+          </div>
+          <div class="glass-card feature-card">
+            <div class="f-ico">💾</div>
+            <h3>Save Projects</h3>
+            <p>Keep your best Flow projects saved to your dashboard and jump back into them anytime.</p>
+          </div>
+          <div class="glass-card feature-card">
+            <div class="f-ico">⚡</div>
+            <h3>One-Click Sessions</h3>
+            <p>Start, pause and resume sessions in a single click — the extension handles the technical setup for you.</p>
+          </div>
         </div>
+      </div>
+    </section>
 
-        <form id="loginForm" class="auth-form active">
-          <div class="form-group">
-            <label>Email</label>
-            <input type="email" name="email" required placeholder="you@example.com">
+    <!-- HOW IT WORKS -->
+    <section id="how" class="section">
+      <div class="container">
+        <div class="section-head">
+          <h2>Up and running in <span class="grad">3 steps</span></h2>
+          <p>No complicated setup. Five minutes from now you can be generating video.</p>
+        </div>
+        <div class="grid-3">
+          <div class="glass-card step-card">
+            <div class="step-n">1</div>
+            <h3>Install the extension</h3>
+            <p>Download the FlowAccess Tool and Pro extensions below and load them into a fresh Chrome profile.</p>
           </div>
-          <div class="form-group">
-            <label>Password</label>
-            <input type="password" name="password" required placeholder="••••••••">
+          <div class="glass-card step-card">
+            <div class="step-n">2</div>
+            <h3>Create your account</h3>
+            <p>Register with your email, verify it with one click, and open your personal dashboard.</p>
           </div>
-          <div class="forgot-row">
-            <a href="#" id="forgotPasswordLink" class="forgot-link">Forgot password?</a>
+          <div class="glass-card step-card">
+            <div class="step-n">3</div>
+            <h3>Start creating</h3>
+            <p>Hit "Access Flow", get your daily session, and start generating AI video with Veo 3.1.</p>
           </div>
-          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Login</button>
-        </form>
+        </div>
+      </div>
+    </section>
 
-        <form id="registerForm" class="auth-form">
-          <div class="form-group">
-            <label>Name</label>
-            <input type="text" name="name" required placeholder="John Doe">
+    <!-- EXTENSIONS -->
+    <section id="extensions" class="section">
+      <div class="container">
+        <div class="section-head">
+          <h2>Get the <span class="grad">extensions</span></h2>
+          <p>Two lightweight Chrome extensions power your FlowAccess sessions. Install both in a new Chrome profile.</p>
+        </div>
+        <div class="grid-2">
+          <div class="glass-card ext-card">
+            <div class="f-ico">🧰</div>
+            <h3>FlowAccess Tool</h3>
+            <p class="muted">v1.4 — session access, cookie handling and Flow integration.</p>
+            <a class="btn btn-primary" href="https://github.com/hussain301/flowaccess-extension/releases/download/tool-v1.4/flowaccess-tool-v1.4.zip" download>⬇️ Download Tool</a>
           </div>
-          <div class="form-group">
-            <label>Email</label>
-            <input type="email" name="email" required placeholder="you@example.com">
+          <div class="glass-card ext-card">
+            <div class="f-ico">🛡️</div>
+            <h3>FlowAccess Pro</h3>
+            <p class="muted">v1.1.0 — companion protection that keeps every session secure.</p>
+            <a class="btn btn-primary" href="https://github.com/hussain301/flowaccess-extension/releases/download/watchdog-v1.1.0/flowaccess-watchdog-v1.1.0.zip" download>⬇️ Download Pro</a>
           </div>
-          <div class="form-group">
-            <label>Password</label>
-            <input type="password" name="password" required placeholder="••••••••">
-          </div>
-          <div class="form-group">
-            <label>Confirm Password</label>
-            <input type="password" name="confirmPassword" required placeholder="••••••••">
-          </div>
-          <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Create Account</button>
-        </form>
-      </section>
-    </main>
+        </div>
+        <p class="muted center" style="margin-top:1rem">After downloading, unzip and load each folder via <code>chrome://extensions</code> → Developer mode → Load unpacked.</p>
+      </div>
+    </section>
 
-    <footer>
-      <p>&copy; 2026 FlowAccess. All rights reserved.</p>
-    </footer>
-  </div>
+    <!-- AUTH -->
+    <section id="auth" class="section">
+      <div class="container">
+        <div class="section-head">
+          <h2>Join <span class="grad">FlowAccess</span></h2>
+          <p>Create a free account or log back into your dashboard.</p>
+        </div>
+        <div class="auth-section glass-card">
+          <div class="auth-tabs">
+            <div id="loginTab" class="auth-tab active">Login</div>
+            <div id="registerTab" class="auth-tab">Register</div>
+          </div>
 
+          <form id="loginForm" class="auth-form active">
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" name="password" required placeholder="••••••••" autocomplete="current-password">
+            </div>
+            <div class="forgot-row">
+              <a href="#" id="forgotPasswordLink" class="forgot-link">Forgot password?</a>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Login</button>
+          </form>
+
+          <form id="registerForm" class="auth-form">
+            <div class="form-group">
+              <label>Name</label>
+              <input type="text" name="name" required placeholder="John Doe" autocomplete="name">
+            </div>
+            <div class="form-group">
+              <label>Email</label>
+              <input type="email" name="email" required placeholder="you@example.com" autocomplete="email">
+            </div>
+            <div class="form-group">
+              <label>Password</label>
+              <input type="password" name="password" required placeholder="••••••••" autocomplete="new-password">
+            </div>
+            <div class="form-group">
+              <label>Confirm Password</label>
+              <input type="password" name="confirmPassword" required placeholder="••••••••" autocomplete="new-password">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Create Account</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section id="faq" class="section">
+      <div class="container">
+        <div class="section-head">
+          <h2>Frequently asked <span class="grad">questions</span></h2>
+        </div>
+        <div class="faq-list">
+          <details class="glass-card faq-item">
+            <summary>Is FlowAccess really free?</summary>
+            <p>Yes. Every account gets a free daily session allowance tracked by a smart timer. There are no subscriptions and no hidden fees.</p>
+          </details>
+          <details class="glass-card faq-item">
+            <summary>What is Google Flow?</summary>
+            <p>Google Flow is Google's AI filmmaking tool (from Google Labs) that turns text prompts into cinematic video clips using models like Veo 3.1. FlowAccess gives you managed access to it.</p>
+          </details>
+          <details class="glass-card faq-item">
+            <summary>Why do I need a new Chrome profile?</summary>
+            <p>FlowAccess runs in an isolated Chrome profile so your personal Google account, cookies and data are never touched. It's a one-minute setup and keeps everything clean and safe.</p>
+          </details>
+          <details class="glass-card faq-item">
+            <summary>How much time do I get per day?</summary>
+            <p>Your daily limit is set by the administrator (commonly a few hours per 24-hour period). The dashboard timer shows exactly how much remains, and you can pause anytime.</p>
+          </details>
+          <details class="glass-card faq-item">
+            <summary>Can I use two sessions at once?</summary>
+            <p>No — each account is limited to one active session at a time, even across different Chrome profiles. This keeps access fair for everyone.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- FINAL CTA -->
+    <section class="section">
+      <div class="container">
+        <div class="glass-card cta-card">
+          <h2>Ready to create with <span class="grad">Google Flow AI</span>?</h2>
+          <p>Join free today — your first session is a click away.</p>
+          <a href="#auth" class="btn btn-primary btn-lg">Get Started Free</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <a href="#top" class="logo">
+        <img src="./favicon.svg" alt="FlowAccess logo" width="22" height="22">
+        Flow<span>Access</span>
+      </a>
+      <p class="muted">&copy; 2026 FlowAccess. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <script>
+    // Sticky nav shadow + FAQ accordion (single-open)
+    const nav = document.querySelector('.site-nav');
+    addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 10), { passive: true });
+    document.querySelectorAll('.faq-item').forEach(d => {
+      d.addEventListener('toggle', () => {
+        if (d.open) document.querySelectorAll('.faq-item').forEach(o => { if (o !== d) o.open = false; });
+      });
+    });
+  </script>
   <script type="module" src="./js/main.js"></script>
 </body>
 </html>
