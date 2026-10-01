@@ -194,12 +194,21 @@ async function wipeInjectedCookies() {
 // snapshot every Google/Flow cookie, clear them for a clean consistent
 // jar, and the full wipe restores the user's own cookies afterwards.
 const FA_COOKIE_BACKUP_KEY = 'faGoogleCookieBackup';
+const FA_COOKIE_BACKUP_VERSION = 1;
 
+// Backup envelope: { v, cookies }. Backups written by older code (a bare
+// array, no version) are treated as ABSENT — they may contain admin
+// residue laundered as "user cookies" by the pre-value-aware code, and
+// restoring them is exactly what produced CookieMismatch.
 async function getCookieBackup() {
     try {
         const r = await chrome.storage.local.get([FA_COOKIE_BACKUP_KEY]);
-        return Array.isArray(r[FA_COOKIE_BACKUP_KEY]) ? r[FA_COOKIE_BACKUP_KEY] : [];
-    } catch (e) { return []; }
+        const b = r[FA_COOKIE_BACKUP_KEY];
+        if (b && typeof b === 'object' && !Array.isArray(b) && b.v === FA_COOKIE_BACKUP_VERSION && Array.isArray(b.cookies)) {
+            return b;
+        }
+        return { v: FA_COOKIE_BACKUP_VERSION, cookies: [] };
+    } catch (e) { return { v: FA_COOKIE_BACKUP_VERSION, cookies: [] }; }
 }
 
 // Re-create chrome.cookies.set details from a chrome.cookies.getAll result.
@@ -298,15 +307,48 @@ async function clearScopedCookies(scope, why) {
 }
 
 // COMPLETE backup + wipe BEFORE injecting the shared session:
-// 1. Snapshot the user's own cookies across the COMPLETE Google scope
-//    (keeps any previously-taken backup, e.g. after a crash, so the
-//    user's originals are never overwritten by a second backup).
-// 2. Wipe the complete scope and VERIFY it is empty.
-// 3. Only then inject the new cookies into a clean jar.
+// 1. Decide whether the live jar currently holds OUR injected session
+//    (browser died mid-session → crash recovery) or the USER's own
+//    cookies (normal case).
+// 2a. Crash recovery: keep the stored versioned backup — it holds the
+//     user's real cookies from before that session.
+// 2b. Normal case: DISCARD any stored backup (a leftover from older code
+//     may be poisoned with admin residue — keeping it blindly is what
+//     caused CookieMismatch) and snapshot the live jar, excluding our
+//     own residue by value.
+// 3. Wipe the complete scope and VERIFY it is empty.
+// 4. Only then inject the new cookies into a clean jar.
 async function backupAndClearGoogleCookies(cookies) {
     const scope = scopeSuffixesFor(cookies);
+    const incomingValues = indexCookieValues(cookies);
+    let all = [];
+    try { all = await chrome.cookies.getAll({}) || []; } catch (e) { all = []; }
+    const scoped = all.filter(c => isScopedCookie(c, scope));
+
+    // Does the live jar currently hold OUR injected session? Compare the
+    // scoped jar against the incoming set: in a crashed session every
+    // comparable cookie matches; in a user jar (different Google
+    // session) essentially none do. The two worlds are far apart, so a
+    // 90% threshold is safe against a single rotated cookie.
+    let comparable = 0, matching = 0;
+    for (const c of scoped) {
+        const d = String(c.domain || '').toLowerCase().replace(/^\./, '');
+        const p = c.path || '/';
+        const key = `${c.name}\n${d}\n${p}`;
+        if (incomingValues.has(key)) {
+            comparable++;
+            if (incomingValues.get(key) === String(c.value)) matching++;
+        }
+    }
+    const jarHoldsOurSession = comparable >= 5 && (matching / comparable) >= 0.9;
+
     const existing = await getCookieBackup();
-    if (!existing.length) {
+    if (existing.cookies.length && jarHoldsOurSession) {
+        console.log('[FlowAccess] Jar holds our injected session (crash recovery) — keeping the stored user backup.');
+    } else {
+        if (existing.cookies.length) {
+            console.log('[FlowAccess] Discarding stale backup — live jar holds the user\'s own cookies, taking a fresh snapshot.');
+        }
         // A jar cookie matching an incoming cookie on name+domain+path
         // WITH THE SAME VALUE is leftover from a previous injection — not
         // the user's cookie — so it is excluded from the backup (the wipe
@@ -314,27 +356,21 @@ async function backupAndClearGoogleCookies(cookies) {
         // the user's own login and IS backed up. This makes the flow
         // fully automatic: no manual cookie deletion is ever needed and
         // the user never notices anything.
-        const incomingValues = indexCookieValues(cookies);
-        let all = [];
-        try { all = await chrome.cookies.getAll({}) || []; } catch (e) { all = []; }
-        const targets = all.filter(c => {
-            if (!isScopedCookie(c, scope)) return false;
+        const targets = scoped.filter(c => {
             const d = String(c.domain || '').toLowerCase().replace(/^\./, '');
             const p = c.path || '/';
             const key = `${c.name}\n${d}\n${p}`;
             if (incomingValues.has(key) && incomingValues.get(key) === String(c.value)) return false;
             return true;
         });
-        const backup = targets.map(cookieToSetDetails);
+        const backup = { v: FA_COOKIE_BACKUP_VERSION, cookies: targets.map(cookieToSetDetails) };
         try {
             await chrome.storage.local.set({ [FA_COOKIE_BACKUP_KEY]: backup });
-            console.log(`[FlowAccess] Backed up ${backup.length} user cookies (complete Google scope).`);
+            console.log(`[FlowAccess] Backed up ${backup.cookies.length} user cookies (complete Google scope).`);
         } catch (e) {
             console.warn('[FlowAccess] Could not store cookie backup:', e);
             return;
         }
-    } else {
-        console.log('[FlowAccess] Cookie backup already held — keeping the original.');
     }
     const leftover = await clearScopedCookies(scope, 'pre-inject clear');
     if (leftover) console.warn(`[FlowAccess] ${leftover} cookies still present after pre-inject clear.`);
@@ -343,7 +379,8 @@ async function backupAndClearGoogleCookies(cookies) {
 // Restore the user's own Google/Flow cookies after the full wipe, then
 // drop the backup so the next session takes a fresh snapshot.
 async function restoreGoogleCookies() {
-    const backup = await getCookieBackup();
+    const stored = await getCookieBackup();
+    const backup = stored.cookies || [];
     if (!backup.length) return 0;
     let restored = 0;
     for (const details of backup) {
