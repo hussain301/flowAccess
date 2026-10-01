@@ -30,6 +30,42 @@ closeModalBtn.addEventListener('click', () => {
   infoModal.classList.remove('show');
 });
 
+// === Mobile browser extension-support check ===
+// On a mobile browser's FIRST visit: if the browser cannot run extensions,
+// show a note with a button to install Firefox (extension-capable).
+// Browsers with real extension support are left alone.
+// Research (2026): Firefox Android = full add-ons; Edge Android (EdgA) =
+// curated extensions; Kiwi / Yandex = Chrome extensions incl. unpacked.
+// No support: Chrome Android, Safari/iOS (Apple restriction), Samsung
+// Internet (content-blockers only), Opera, Vivaldi, in-app webviews.
+(function mobileExtCheck() {
+  try {
+    const ua = navigator.userAgent || '';
+    if (!/Android|iPhone|iPad|iPod/i.test(ua)) return;           // desktop: skip
+    if (localStorage.getItem('fa_mobile_ext_note')) return;      // already shown once
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const extCapable = /FxiOS|Firefox|EdgA|EdgiOS|Kiwi|YaBrowser/i.test(ua);
+    localStorage.setItem('fa_mobile_ext_note', '1');
+    if (extCapable && !isIOS) return;                            // supported: no popup
+
+    const modal = document.getElementById('mobileExtModal');
+    const text = document.getElementById('mobileExtText');
+    const installBtn = document.getElementById('installFirefoxBtn');
+    if (isIOS) {
+      text.textContent = "Apple doesn't allow browser extensions on iPhone/iPad, so FlowAccess sessions can't run here. Please open this site on an Android device or a computer instead.";
+      installBtn.style.display = 'none';
+    } else {
+      text.textContent = "This browser doesn't support extensions, and FlowAccess needs them to run sessions. Install Firefox (free) and open this site there instead.";
+      installBtn.style.display = '';
+    }
+    infoModal.classList.remove('show');   // don't stack with the Quick Note
+    modal.classList.add('show');
+    const dismiss = () => modal.classList.remove('show');
+    document.getElementById('mobileExtDismiss').addEventListener('click', dismiss);
+    installBtn.addEventListener('click', dismiss);
+  } catch (e) { /* never break the page over this check */ }
+})();
+
 loginTab.addEventListener('click', () => {
   loginTab.classList.add('active');
   registerTab.classList.remove('active');
