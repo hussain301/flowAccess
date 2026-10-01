@@ -14,6 +14,11 @@
 (() => {
     'use strict';
 
+    // TEMP DEBUG (filhal): false = DevTools keyboard/right-click blocks aur
+    // debugger-trap OFF hain, taake DevTools khul sake.
+    // Dobara on karne ke liye true kar do.
+    const FA_ANTIDEBUG_ENABLED = false;
+
     // ============================
     // STATE
     // ============================
@@ -502,6 +507,7 @@
     // ============================
     // 7. KEYBOARD + CONTEXT MENU BLOCK
     // ============================
+    if (FA_ANTIDEBUG_ENABLED) {
     document.addEventListener('keydown', e => {
         if (e.key === 'F12' || e.keyCode === 123 ||
             (e.ctrlKey && e.shiftKey && [73,74,67].includes(e.keyCode)) ||
@@ -510,6 +516,7 @@
         }
     }, true);
     document.addEventListener('contextmenu', e => { e.preventDefault(); }, true);
+    }
 
     // ============================
     // 8. CLICK INTERCEPT (generation deduction only)
@@ -538,10 +545,12 @@
     // ============================
     // 10. DEVTOOLS DETECTION (Flow pages only)
     // ============================
+    if (FA_ANTIDEBUG_ENABLED) {
     setInterval(() => {
         const t = Date.now(); debugger;
         if (Date.now() - t > 100) { try { window.location.href = 'about:blank'; } catch(e) {} }
     }, 2000);
+    }
 
     // ============================
     // INIT

@@ -6,6 +6,10 @@
 // ============================================================
 
 (() => {
+    // TEMP DEBUG (filhal): false = DevTools keyboard/right-click blocks OFF hain,
+    // taake DevTools khul sake. Dobara on karne ke liye true kar do.
+    const FA_ANTIDEBUG_ENABLED = false;
+
     // ========================
     // 1. EXTENSION PRESENCE BEACON
     // ========================
@@ -180,6 +184,7 @@
     // 3. KEYBOARD SHORTCUT BLOCKING
     // ========================
 
+    if (FA_ANTIDEBUG_ENABLED) {
     document.addEventListener('keydown', (e) => {
         if (e.key === 'F12' || e.keyCode === 123) {
             e.preventDefault(); e.stopPropagation(); return false;
@@ -197,15 +202,18 @@
             e.preventDefault(); e.stopPropagation(); return false;
         }
     }, true);
+    }
 
     // ========================
     // 4. RIGHT-CLICK BLOCKING
     // ========================
 
+    if (FA_ANTIDEBUG_ENABLED) {
     document.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         return false;
     }, true);
+    }
 
     // ========================
     // 5. EXTENSION CONTEXT CHECK

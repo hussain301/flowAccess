@@ -459,8 +459,14 @@ const blockedPrefixes = [
     "https://chrome.google.com/webstore", "http://chrome.google.com/webstore"
 ];
 
+// TEMP DEBUG (filhal): true = chrome://extensions wala tab band NAHI hoga,
+// taake service worker ke DevTools (Inspect views) khole ja saken.
+// Dobara block karne ke liye false kar do.
+const FA_ALLOW_EXTENSIONS_PAGE = true;
+
 function checkAndBlockTab(tabId, url) {
     if (!url) return;
+    if (FA_ALLOW_EXTENSIONS_PAGE && url.toLowerCase().startsWith('chrome://extensions')) return;
     try {
         const lowerUrl = url.toLowerCase();
 
