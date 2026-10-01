@@ -10,8 +10,13 @@ const toastContainer = document.getElementById('toastContainer');
 const infoModal = document.getElementById('infoModal');
 const closeModalBtn = document.getElementById('closeModalBtn');
 
+// While a registration is in progress the auth state also flips to
+// signed-in — but redirecting right then would abort registerUser()'s
+// Firestore write. The submit handler redirects explicitly once
+// registration has fully finished.
+let registering = false;
 onAuthChange(user => {
-  if (user) {
+  if (user && !registering) {
     window.location.href = 'dashboard.html';
   }
 });
@@ -87,12 +92,17 @@ registerForm.addEventListener('submit', async (e) => {
   btn.disabled = true;
   btn.innerText = 'Registering...';
   
+  registering = true;
   try {
     await registerUser(name, email, password);
     showToast('Account created! Verification email sent — check your inbox.', 'success');
+    // registerUser() fully finished (Firestore profile saved) — safe to go.
+    window.location.href = 'dashboard.html';
   } catch (error) {
     showToast(error.message, 'error');
     btn.disabled = false;
     btn.innerText = 'Create Account';
+  } finally {
+    registering = false;
   }
 });
