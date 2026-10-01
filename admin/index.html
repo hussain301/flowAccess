@@ -206,6 +206,7 @@
         <div class="view-header"><h1>Dashboard</h1></div>
         <div class="stats-grid">
           <div class="stat-card"><h3>Total Users</h3><div class="stat-value" id="statUsers">0</div></div>
+          <div class="stat-card"><h3>Website Visits (5h)</h3><div class="stat-value" id="statVisits">0</div></div>
           <div class="stat-card"><h3>Active Sessions</h3><div class="stat-value" id="statActive">0</div></div>
           <div class="stat-card"><h3>Sessions Today</h3><div class="stat-value" id="statToday">0</div></div>
           <div class="stat-card"><h3>Total Sessions</h3><div class="stat-value" id="statTotal">0</div></div>
@@ -477,6 +478,11 @@ async function loadDashboard() {
     const dayStart = new Date(); dayStart.setHours(0,0,0,0);
     const activeCount = await getCountFromServer(query(collection(db, 'sessions'), where('status', '==', 'Active')));
     $('statActive').textContent = activeCount.data().count;
+    // Unique visitors in the last 5h — the dashboard writes one doc per
+    // user (doc id = uid) at most once per 5h, so this is a deduped count.
+    const fiveHoursAgo = new Date(Date.now() - 5 * 60 * 60 * 1000);
+    const visitsCount = await getCountFromServer(query(collection(db, 'visits'), where('lastSeen', '>=', Timestamp.fromDate(fiveHoursAgo))));
+    $('statVisits').textContent = visitsCount.data().count;
     const todayCount = await getCountFromServer(query(collection(db, 'sessions'), where('startTime', '>=', Timestamp.fromDate(dayStart))));
     $('statToday').textContent = todayCount.data().count;
 

@@ -82,6 +82,7 @@ onAuthChange(async (user) => {
     return;
   }
   hideVerifyEmailOverlay();
+  recordVisit(); // one write per 5h — feeds the admin "Website Visits" stat
   
   try {
     let userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -1134,6 +1135,25 @@ async function openProjectWithSession(url) {
     }
   } finally {
     projectOpening = false;
+  }
+}
+
+// === VISIT TRACKING (powers the admin "Website Visits" stat) ===
+// One Firestore write per user per 5 hours — the doc id IS the uid, so
+// repeat visits just overwrite the same doc (no duplicate entries, ever).
+const VISIT_WINDOW_MS = 5 * 60 * 60 * 1000;
+async function recordVisit() {
+  try {
+    const key = 'fa_last_visit';
+    const last = parseInt(localStorage.getItem(key) || '0', 10);
+    if (Date.now() - last < VISIT_WINDOW_MS) return;
+    await setDoc(doc(db, 'visits', currentUser.uid), {
+      email: currentUser.email || '',
+      lastSeen: serverTimestamp()
+    }, { merge: true });
+    localStorage.setItem(key, String(Date.now()));
+  } catch (e) {
+    console.warn('[Dashboard] Visit record failed:', e.message);
   }
 }
 

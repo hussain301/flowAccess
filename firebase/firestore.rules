@@ -39,6 +39,14 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Visits — one doc per user (doc id = uid), overwritten at most once
+    // per 5h by the dashboard. Only admins may read the collection.
+    match /visits/{userId} {
+      allow read: if isAdmin();
+      allow create, update: if isAuth() && request.auth.uid == userId;
+      allow delete: if isAdmin();
+    }
+
     // Endpoints — admin only
     match /endpoints/{endpointId} {
       allow read, write: if isAdmin();
