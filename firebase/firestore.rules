@@ -19,11 +19,14 @@ service cloud.firestore {
       return isAuth() && (request.auth.token.email_verified == true || isAdmin());
     }
 
-    // Users collection — users can read own data, admin can read/write all
+    // Users collection — users can read own data, admin can read/write all.
+    // A user may update ONLY their own activeSessionId field (the
+    // single-active-session slot, claimed/released in transactions).
     match /users/{userId} {
       allow read: if isAuth() && (request.auth.uid == userId || isAdmin());
       allow create: if isAuth() && request.auth.uid == userId;
-      allow update: if isAdmin();
+      allow update: if isAdmin() || (isAuth() && request.auth.uid == userId
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['activeSessionId']));
       allow delete: if false;
     }
 

@@ -2,8 +2,8 @@ import { auth, db } from './firebase-config.js';
 import { logoutUser, onAuthChange, resendVerificationEmail } from './auth.js';
 import { decryptCookies } from './cookie-crypto.js';
 import { 
-  collection, query, where, getDocs, doc, setDoc, addDoc, updateDoc, 
-  serverTimestamp, orderBy, getDoc 
+  collection, query, where, getDocs, doc, setDoc, updateDoc, 
+  serverTimestamp, orderBy, getDoc, runTransaction, deleteField 
 } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 
 // === STATE ===
@@ -707,6 +707,107 @@ async function expireStaleSession(id, data, now) {
   } catch(e) {
     console.warn('[Dashboard] Could not expire stale session:', e.message);
   }
+  // Best-effort: if the user's slot still points at this dead session,
+  // release it so a new session can be claimed.
+  releaseSessionSlot(id);
+}
+
+// === SINGLE-ACTIVE-SESSION SLOT ===
+// One user may hold only ONE live session at a time — across browser
+// profiles, tabs and devices. The slot lives on users/{uid}.activeSessionId
+// and is claimed/released inside Firestore transactions, so two "Start"
+// clicks racing from different profiles cannot both win.
+
+// A session occupies the slot while it is Active (and its heartbeat is
+// fresh) or Paused (unless paused for longer than a full session length,
+// i.e. abandoned).
+function isSlotOccupied(data, now) {
+  const st = data.status;
+  if (st !== 'Active' && st !== 'Paused') return false;
+  if (st === 'Active') return !isSessionStale(data, now);
+  const pMs = data.pausedAt && data.pausedAt.toMillis ? data.pausedAt.toMillis() : 0;
+  return pMs ? (now.getTime() - pMs) < DEFAULT_TIME_MS : true;
+}
+
+function alreadyActiveError() {
+  const err = new Error('already-active');
+  err.code = 'already-active';
+  return err;
+}
+
+// Atomically claim the user's session slot and create the session doc.
+// buildSessionData() returns the fields for the new session document.
+// resumingId: when resuming, the paused session being resumed may hold the
+// slot — that is allowed (it is our own session).
+// Returns the new session id, or throws { code: 'already-active' }.
+async function claimSessionSlot(buildSessionData, resumingId = null) {
+  const userRef = doc(db, 'users', currentUser.uid);
+  return await runTransaction(db, async (tx) => {
+    const now = new Date();
+    const userSnap = await tx.get(userRef);
+    const activeId = userSnap.exists() ? (userSnap.data().activeSessionId || null) : null;
+    if (activeId && activeId !== resumingId) {
+      const sRef = doc(db, 'sessions', activeId);
+      const sSnap = await tx.get(sRef);
+      if (sSnap.exists() && isSlotOccupied(sSnap.data(), now)) {
+        throw alreadyActiveError();
+      }
+      // Stale/abandoned slot holder — release it as Expired.
+      if (sSnap.exists()) {
+        tx.update(sRef, {
+          status: 'Expired',
+          endedAt: serverTimestamp(),
+          endTime: serverTimestamp(),
+          expiredReason: 'slot-takeover'
+        });
+      }
+    }
+    const newRef = doc(collection(db, 'sessions'));
+    tx.set(newRef, buildSessionData());
+    tx.set(userRef, { activeSessionId: newRef.id }, { merge: true });
+    return newRef.id;
+  });
+}
+
+// Release the slot, but only if it still points at our session (never
+// clear a newer session claimed by another profile after a takeover).
+async function releaseSessionSlot(sessionId) {
+  if (!currentUser || !sessionId) return;
+  const userRef = doc(db, 'users', currentUser.uid);
+  try {
+    await runTransaction(db, async (tx) => {
+      const u = await tx.get(userRef);
+      if (u.exists() && u.data().activeSessionId === sessionId) {
+        tx.update(userRef, { activeSessionId: deleteField() });
+      }
+    });
+  } catch(e) {
+    console.warn('[Dashboard] Could not release session slot:', e.message);
+  }
+}
+
+// Fast pre-check before injecting cookies: is the slot already held by a
+// live session? (The transaction in claimSessionSlot re-checks atomically;
+// this just avoids a wasted inject in the obvious case.)
+async function isSlotTakenByOther() {
+  try {
+    const u = await getDoc(doc(db, 'users', currentUser.uid));
+    const activeId = u.exists() ? (u.data().activeSessionId || null) : null;
+    if (!activeId || activeId === currentSessionId) return false;
+    const s = await getDoc(doc(db, 'sessions', activeId));
+    return s.exists() && isSlotOccupied(s.data(), new Date());
+  } catch(e) {
+    console.warn('[Dashboard] Slot pre-check failed:', e.message);
+    return false;
+  }
+}
+
+function showAlreadyActive() {
+  showToast("⚠️ You already have an active session. End it before starting a new one.", "error");
+  startFlowBtn.disabled = false;
+  startFlowBtn.innerText = "▶ Access Flow";
+  resumeFlowBtn.disabled = false;
+  resumeFlowBtn.innerText = "▶ Resume Session";
 }
 
 // === BUTTON STATES ===
@@ -972,6 +1073,14 @@ startFlowBtn.addEventListener('click', async () => {
     setProtectionBadge('ready');
     hideProtectionOverlay();
 
+    // 0b. Single active session per user (across profiles/tabs/devices) —
+    //     check BEFORE injecting so a blocked start never touches cookies.
+    startFlowBtn.innerText = "⏳ Checking session...";
+    if (await isSlotTakenByOther()) {
+      showAlreadyActive();
+      return;
+    }
+
     // 1. Inject cookies FIRST and await the result — never create a
     //    session when injection failed.
     startFlowBtn.innerText = "⏳ Injecting access...";
@@ -983,20 +1092,39 @@ startFlowBtn.addEventListener('click', async () => {
       return;
     }
 
-    // 2. Create session in Firestore (only after injection succeeded)
-    const sessionRef = await addDoc(collection(db, 'sessions'), {
-      userId: currentUser.uid,
-      userEmail: currentUser.email,
-      startedAt: serverTimestamp(),
-      startTime: serverTimestamp(),
-      endedAt: null,
-      endTime: null,
-      durationMs: 0,
-      lastHeartbeat: serverTimestamp(),
-      status: 'Active'
-    });
+    // 2. Create session in Firestore (only after injection succeeded).
+    //    The slot claim is transactional: if another profile grabbed a
+    //    session in the meantime, this aborts — wipe the just-injected
+    //    cookies so no orphan access remains.
+    let sessionId;
+    try {
+      sessionId = await claimSessionSlot(() => ({
+        userId: currentUser.uid,
+        userEmail: currentUser.email,
+        startedAt: serverTimestamp(),
+        startTime: serverTimestamp(),
+        endedAt: null,
+        endTime: null,
+        durationMs: 0,
+        lastHeartbeat: serverTimestamp(),
+        status: 'Active'
+      }));
+    } catch (e) {
+      // Slot lost the race (another profile started first) — wipe the
+      // just-injected cookies so no orphan access remains.
+      sendToExtension('WIPE_COOKIES', {});
+      if (e && e.code === 'already-active') {
+        showToast("⚠️ You already have an active session. End it before starting a new one.", "error");
+      } else {
+        console.error("Error starting flow:", e);
+        showToast("❌ Failed to start. Try again.", "error");
+      }
+      startFlowBtn.disabled = false;
+      startFlowBtn.innerText = "▶ Access Flow";
+      return;
+    }
 
-    currentSessionId = sessionRef.id;
+    currentSessionId = sessionId;
     isPaused = false;
 
     // 3. Start countdown timer + heartbeat (Flow tab was opened/reloaded
@@ -1096,6 +1224,14 @@ resumeFlowBtn.addEventListener('click', async () => {
     setProtectionBadge('ready');
     hideProtectionOverlay();
 
+    // Single active session per user — check before injecting.
+    // (The paused session being resumed holds the slot; that is allowed.)
+    resumeFlowBtn.innerText = "🔍 Checking session...";
+    if (await isSlotTakenByOther()) {
+      showAlreadyActive();
+      return;
+    }
+
     // 1. Re-inject cookies and await the result — never resume the
     //    session when injection failed.
     resumeFlowBtn.innerText = "⏳ Injecting access...";
@@ -1107,21 +1243,34 @@ resumeFlowBtn.addEventListener('click', async () => {
       return;
     }
 
-    // 2. Create new session (old one was paused with duration saved)
-    const sessionRef = await addDoc(collection(db, 'sessions'), {
-      userId: currentUser.uid,
-      userEmail: currentUser.email,
-      startedAt: serverTimestamp(),
-      startTime: serverTimestamp(),
-      endedAt: null,
-      endTime: null,
-      durationMs: 0,
-      lastHeartbeat: serverTimestamp(),
-      status: 'Active',
-      resumedFrom: currentSessionId
-    });
-    
-    currentSessionId = sessionRef.id;
+    // 2. Claim the session slot transactionally (a new session row is
+    //    created; the old one was paused with duration saved). The paused
+    //    session being resumed may hold the slot — that is allowed.
+    let newSessionId;
+    try {
+      newSessionId = await claimSessionSlot(() => ({
+        userId: currentUser.uid,
+        userEmail: currentUser.email,
+        startedAt: serverTimestamp(),
+        startTime: serverTimestamp(),
+        endedAt: null,
+        endTime: null,
+        durationMs: 0,
+        lastHeartbeat: serverTimestamp(),
+        status: 'Active',
+        resumedFrom: currentSessionId
+      }), currentSessionId);
+    } catch (e) {
+      sendToExtension('WIPE_COOKIES', {});
+      showToast(e && e.code === 'already-active'
+        ? "⚠️ You already have an active session. End it before starting a new one."
+        : "❌ Failed to resume. Try again.", "error");
+      resumeFlowBtn.disabled = false;
+      resumeFlowBtn.innerText = "▶ Resume Session";
+      return;
+    }
+
+    currentSessionId = newSessionId;
     isPaused = false;
     
     // 3. Restart timer + heartbeat
@@ -1161,6 +1310,9 @@ async function endSession(status = 'Completed') {
         status: status
       });
     }
+
+    // Release the single-session slot (only if it still points at us).
+    await releaseSessionSlot(currentSessionId);
     
     currentSessionId = null;
     if (timerInterval) clearInterval(timerInterval);

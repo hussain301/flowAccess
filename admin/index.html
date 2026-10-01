@@ -306,7 +306,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-auth.js";
-import { getFirestore, collection, getDocs, getDoc, doc, updateDoc, deleteDoc, setDoc, addDoc, query, orderBy, limit, serverTimestamp, where, getCountFromServer, Timestamp } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
+import { getFirestore, collection, getDocs, getDoc, doc, updateDoc, deleteDoc, setDoc, addDoc, query, orderBy, limit, serverTimestamp, where, getCountFromServer, Timestamp, deleteField } from "https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js";
 import { encryptCookies } from '../website/js/cookie-crypto.js';
 
 const app = initializeApp({
@@ -607,6 +607,14 @@ window.resetUserSession = async (uid, email, timeLimit) => {
         });
         resetCount++;
       }
+    }
+
+    // Release the user's single-session slot so they can start fresh
+    // immediately (their old Active/Paused session was just reset).
+    try {
+      await updateDoc(doc(db, 'users', uid), { activeSessionId: deleteField() });
+    } catch(e) {
+      console.warn('Could not clear activeSessionId:', e.message);
     }
     
     toast(`✅ Reset ${resetCount} session(s) for ${email}. User now has fresh ${timeLimit} min.`, 'success');
