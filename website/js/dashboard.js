@@ -269,7 +269,27 @@ async function monitorExtension() {
   // Only announce a watchdog restore when a removal was actually fired —
   // otherwise a single blip would produce a spurious "restored" toast.
   if (wdOk && !prevWdOk && watchdogRemovalFired) { onWatchdogRestored(); return; }
+  // Away-wipe backup poll: active session but the injected cookies are
+  // gone (e.g. the storage push was missed) → auto-pause.
+  if (mainAlive && currentSessionId && !isPaused) {
+    try {
+      const st = await requestFromExtension('GET_INJECTED_STATE', {});
+      if (st && st.success && st.intact === false) {
+        await handleAwayWipe();
+        return;
+      }
+    } catch (e) {}
+  }
   updateButtonStates();
+}
+
+// Away-wipe: the user navigated to a non-Flow site, so the extension
+// wiped ONLY the injected cookies. Auto-pause the active session.
+async function handleAwayWipe() {
+  try { await requestFromExtension('CLEAR_AWAY_WIPE', {}); } catch (e) {}
+  if (!currentSessionId || isPaused) return;
+  showToast('⏸ Session auto-paused — you left Flow.', 'success');
+  await autoPauseSession('away-wipe');
 }
 
 // Shared server-side auto-pause (used for both removal cases).
@@ -762,6 +782,12 @@ function requestFromExtension(action, payload, timeoutMs) {
 // Listen for extension replies
 window.addEventListener('message', (event) => {
   if (event.source !== window || !event.data) return;
+  // Away-wipe push from the extension (via the content-script storage
+  // listener): the user left Flow, injected cookies were wiped.
+  if (event.data.source === 'FLOW_ACCESS_EVENT' && event.data.event === 'AWAY_WIPE') {
+    handleAwayWipe();
+    return;
+  }
   if (event.data.source !== 'FLOW_ACCESS_EXTENSION_REPLY') return;
 
   const { id, payload } = event.data;

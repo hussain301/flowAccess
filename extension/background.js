@@ -61,6 +61,7 @@ function toCookieDetails(c) {
  */
 async function setCookieList(cookies) {
     let injected = 0, failed = 0;
+    const injectedDetails = [];
     const list = Array.isArray(cookies) ? cookies.slice(0, 500) : [];
     for (const c of list) {
         try {
@@ -71,6 +72,7 @@ async function setCookieList(cookies) {
             const setResult = await chrome.cookies.set(details);
             if (setResult) {
                 injected++;
+                injectedDetails.push({ name: details.name, url: details.url });
             } else {
                 failed++;
                 console.warn(`[FlowAccess] Cookie refused (null result): ${details.name} on ${details.domain}`);
@@ -80,8 +82,54 @@ async function setCookieList(cookies) {
             failed++;
         }
     }
+    // Single write — tracks exactly the cookies of this injection.
+    await resetInjectedCookies(injectedDetails);
     console.log(`[FlowAccess] Injected ${injected} cookies, ${failed} failed`);
     return { injected, failed };
+}
+
+// ========================
+// 2b. INJECTED-COOKIE TRACKING + TARGETED WIPE
+// ========================
+// We remember exactly which cookies we injected (name + url), so the
+// away-wipe removes ONLY those — the user's own cookies are never touched.
+const FA_INJECTED_KEY = 'faInjectedCookies';
+const FA_AWAY_WIPE_KEY = 'faAwayWipe';
+
+async function getInjectedCookies() {
+    try {
+        const r = await chrome.storage.local.get([FA_INJECTED_KEY]);
+        return Array.isArray(r[FA_INJECTED_KEY]) ? r[FA_INJECTED_KEY] : [];
+    } catch (e) { return []; }
+}
+
+// Replace the tracked set (used after a fresh full injection).
+async function resetInjectedCookies(list) {
+    try {
+        await chrome.storage.local.set({ [FA_INJECTED_KEY]: Array.isArray(list) ? list : [] });
+    } catch (e) {}
+}
+
+// Remove ONLY the cookies we injected. Returns the count removed.
+// Sets the faAwayWipe flag so the dashboard can auto-pause immediately.
+async function wipeInjectedCookies() {
+    const list = await getInjectedCookies();
+    if (!list.length) return 0;
+    let removed = 0;
+    for (const c of list) {
+        try {
+            if (c && c.name && c.url) {
+                await chrome.cookies.remove({ url: c.url, name: c.name });
+                removed++;
+            }
+        } catch (e) {}
+    }
+    try {
+        await chrome.storage.local.remove([FA_INJECTED_KEY]);
+        await chrome.storage.local.set({ [FA_AWAY_WIPE_KEY]: { at: Date.now(), removed } });
+    } catch (e) {}
+    console.log(`[FlowAccess] Away-wipe: removed ${removed}/${list.length} injected cookies`);
+    return removed;
 }
 
 /**
@@ -227,7 +275,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'PING') {
         // MV3 setInterval is unreliable when the service worker is suspended;
         // the dashboard PINGs every ~10s, so use it as the enforcement heartbeat.
-        enforceOnlyAllowedExtensions().catch(() => {});
+        enforceCookieCopierDenylist().catch(() => {});
         (async () => {
             try {
                 const wd = await getWatchdogStatus();
@@ -247,6 +295,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     // Wipe Flow/Google cookies (scoped — never touches other sites' cookies)
     if (request.action === 'WIPE_COOKIES') {
         wipeFlowCookies().then(() => sendResponse({ success: true }));
+        return true;
+    }
+
+    // Dashboard poll: are the injected cookies still intact? (away-wipe
+    // clears the tracked list, so a wipe shows up as intact:false.)
+    if (request.action === 'GET_INJECTED_STATE') {
+        (async () => {
+            const list = await getInjectedCookies();
+            sendResponse({ success: true, intact: list.length > 0, count: list.length });
+        })();
+        return true;
+    }
+
+    // Dashboard acknowledges the away-wipe push — clear the one-shot flag.
+    if (request.action === 'CLEAR_AWAY_WIPE') {
+        (async () => {
+            try { await chrome.storage.local.remove([FA_AWAY_WIPE_KEY]); } catch (e) {}
+            sendResponse({ success: true });
+        })();
         return true;
     }
 
@@ -422,69 +489,35 @@ async function clearProjectHistory() {
 }
 
 // ========================
-// 3. TAB / URL BLOCKING
+// 3. AWAY-WIPE (no tab blocking)
 // ========================
+// Normal browsing stays fully open — no tab is ever closed for visiting
+// another site. The only automatic reaction: when any tab navigates to a
+// real website other than Flow while we hold injected cookies, ONLY those
+// injected cookies are wiped (nothing else is touched). The dashboard
+// notices the missing cookies and auto-pauses the session.
 
-const blockedDomains = [
-    "www.google.com", "translate.google.com", "gemini.google.com",
-    "mail.google.com", "drive.google.com", "docs.google.com",
-    "sheets.google.com", "slides.google.com", "forms.google.com",
-    "meet.google.com", "calendar.google.com", "keep.google.com",
-    "contacts.google.com", "photos.google.com",
-    "www.youtube.com", "music.youtube.com",
-    "play.google.com", "maps.google.com", "earth.google.com",
-    "flights.google.com", "ads.google.com", "analytics.google.com",
-    "www.blogger.com", "sites.google.com", "search.google.com",
-    "one.google.com", "cloud.google.com", "about.google",
-    "chromewebstore.google.com", "chrome.google.com"
-];
+// Hosts where an active session may live. Everything else counts as "away".
+const FA_ALLOWED_HOSTS = ['flow.google.com'];
 
-const blockedPrefixes = [
-    "chrome://settings", "chrome://password-manager", "chrome://extensions",
-    "edge://settings", "edge://password-manager", "edge://extensions",
-    "https://chromewebstore.google.com", "http://chromewebstore.google.com",
-    "https://chrome.google.com/webstore", "http://chrome.google.com/webstore"
-];
-
-// TEMP DEBUG (filhal): true = chrome://extensions wala tab band NAHI hoga,
-// taake service worker ke DevTools (Inspect views) khole ja saken.
-// Dobara block karne ke liye false kar do.
-const FA_ALLOW_EXTENSIONS_PAGE = true;
-
-function checkAndBlockTab(tabId, url) {
-    if (!url) return;
-    if (FA_ALLOW_EXTENSIONS_PAGE && url.toLowerCase().startsWith('chrome://extensions')) return;
+function isAwayUrl(url) {
+    if (!url || typeof url !== 'string') return false;
+    if (!/^https?:\/\//i.test(url)) return false; // ignore chrome://, about:, etc.
     try {
-        const lowerUrl = url.toLowerCase();
-
-        for (const prefix of blockedPrefixes) {
-            if (lowerUrl.startsWith(prefix)) {
-                chrome.tabs.remove(tabId).catch(() => { });
-                return;
-            }
-        }
-
-        if (lowerUrl.includes("chromewebstore.google.com") || lowerUrl.includes("chrome.google.com/webstore")) {
-            chrome.tabs.remove(tabId).catch(() => { });
-            return;
-        }
-
-        const urlObj = new URL(url);
-        const hostname = urlObj.hostname.toLowerCase();
-
-        if (hostname === "flow.google.com") return;
-
-        if (blockedDomains.includes(hostname)) {
-            chrome.tabs.remove(tabId).catch(() => { });
-        }
+        return !FA_ALLOWED_HOSTS.includes(new URL(url).hostname.toLowerCase());
     } catch (e) {
-        // Ignore invalid URLs
+        return false;
     }
+}
+
+async function handleTabNavigation(url) {
+    if (!isAwayUrl(url)) return;
+    await wipeInjectedCookies(); // no-op when nothing was injected
 }
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     const url = (tab && (tab.url || tab.pendingUrl)) || (changeInfo && changeInfo.url);
-    checkAndBlockTab(tabId, url);
+    handleTabNavigation(url).catch(() => {});
 
     if (url && isFlowUrl(url)) {
         enforceSingleFlowTab();
@@ -494,7 +527,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 chrome.tabs.onCreated.addListener((tab) => {
     if (tab) {
         const url = tab.url || tab.pendingUrl;
-        checkAndBlockTab(tab.id, url);
+        handleTabNavigation(url).catch(() => {});
     }
 });
 
@@ -566,16 +599,19 @@ async function wipeFlowCookies() {
 console.log('[FlowAccess] Background service worker initialized');
 
 // ========================
-// 6. EXTENSION ENFORCEMENT
+// 6. COOKIE-COPIER DENYLIST (only these are blocked)
 // ========================
-// The paired watchdog (matched by its extension ID, never by name) is
-// exempt. Everything else gets disabled — but NOT instantly: a freshly
-// installed watchdog needs time to publish its ID to the registry
-// cookie, so unknown extensions get a grace period first. And a disable
-// performed BY this enforcement is never treated as tampering (see the
-// self-disable guard in section 7) — otherwise our own enforcement
-// would look like an attack and nuke the session.
-const ENFORCE_GRACE_MS = 90000; // 90s for a new watchdog to publish its ID
+// Every other extension is left completely alone — the browser behaves
+// like a normal one. ONLY extensions whose job is copying/exporting
+// cookies stay blocked, because they could steal the injected session.
+// IDs verified against the Chrome Web Store listings.
+const COOKIE_COPY_DENYLIST = new Set([
+    'fngmhnnpilhplaeedifhccceomclgfbg', // EditThisCookie
+    'hlkenndednhfkekhgcdicdfddnkalmdm', // Cookie-Editor (Moustachauve)
+    'iphcomljdfghbkdcfndaijbokpgddeno', // Cookie Editor (HotCleaner)
+    'mhelhppllnfkpaboohnijkfjeclehgab', // Open Cookie Editor
+    'ookdjilphngeeeghgngjabigmpepanpl', // Cookie Editor (thanhbui28)
+]);
 const SELF_DISABLE_GUARD_MS = 15000;
 
 // IDs we disabled ourselves, persisted in chrome.storage.local under
@@ -638,124 +674,39 @@ async function disableExtension(id, reason) {
     });
 }
 
-// firstSeen registry: extension id -> timestamp of first sighting.
-// Persisted so a service-worker restart doesn't reset the grace period.
-// Returns null when the storage read itself fails — callers must skip
-// their write in that case (fail-closed).
-async function getFirstSeenMap() {
-    try {
-        const r = await chrome.storage.local.get(['faFirstSeen']);
-        return (r.faFirstSeen && typeof r.faFirstSeen === 'object') ? r.faFirstSeen : {};
-    } catch (e) {
-        console.warn('[FlowAccess] faFirstSeen read failed:', e);
-        return null;
-    }
-}
-async function noteFirstSeen(id) {
-    let map;
-    try {
-        map = await getFirstSeenMap();
-    } catch (e) {
-        console.warn('[FlowAccess] noteFirstSeen read failed:', e);
-        return 0;
-    }
-    if (map === null) return 0; // sentinel: read failed — fail closed, no write
-    try {
-        if (!map[id]) {
-            map[id] = Date.now();
-            await chrome.storage.local.set({ faFirstSeen: map });
-        }
-        return map[id];
-    } catch (e) {
-        console.warn('[FlowAccess] noteFirstSeen write failed:', e);
-        return 0;
-    }
-}
-async function forgetFirstSeen(id) {
-    let map;
-    try {
-        map = await getFirstSeenMap();
-    } catch (e) { return; }
-    if (map === null) return; // read failed — skip the write
-    if (map[id]) {
-        delete map[id];
-        try { await chrome.storage.local.set({ faFirstSeen: map }); } catch (e) {}
-    }
-}
-
-async function enforceOnlyAllowedExtensions() {
+async function enforceCookieCopierDenylist() {
     if (!chrome.management) return;
-
     const myId = chrome.runtime.id;
-    await syncPeerId().catch(() => {});
-
-    // Read the firstSeen map ONCE per run; mutate in memory; write once
-    // at the end — no per-extension read-modify-write races.
-    const map = await getFirstSeenMap();
-    if (map === null) return; // storage unreadable — do nothing this run
-
-    const extensions = await new Promise((resolve) => {
-        try { chrome.management.getAll((list) => resolve(list || [])); }
-        catch (e) { resolve([]); }
-    });
-
-    const seen = new Set();
+    let extensions = [];
+    try {
+        extensions = await new Promise((resolve) => {
+            try { chrome.management.getAll((list) => resolve(list || [])); }
+            catch (e) { resolve([]); }
+        });
+    } catch (e) { return; }
     for (const ext of extensions) {
         if (!ext || ext.id === myId) continue;
-        if (ext.type === 'theme') continue;
-        if (ext.id === peerWatchdogId) {
-            if (map[ext.id]) delete map[ext.id]; // paired: exempt, drop stale entry
-            continue;
-        }
-        seen.add(ext.id);
-        // Record the sighting for enabled AND disabled extensions alike,
-        // so a disabled-then-re-enabled extension keeps its original
-        // firstSeen instead of getting a fresh grace period.
-        if (!map[ext.id]) map[ext.id] = Date.now();
+        if (!COOKIE_COPY_DENYLIST.has(ext.id)) continue; // everything else is allowed
         if (!ext.enabled) continue;
-        const age = Date.now() - map[ext.id];
-        if (age < ENFORCE_GRACE_MS) {
-            console.log(`[FlowAccess] Enforcement grace for ${ext.id} (${Math.round((ENFORCE_GRACE_MS - age) / 1000)}s left)`);
-            continue;
-        }
-        await disableExtension(ext.id, 'not allowlisted');
-    }
-    // Prune entries for extensions that are gone
-    for (const id of Object.keys(map)) {
-        if (!seen.has(id) && id !== peerWatchdogId) delete map[id];
-    }
-    try {
-        await chrome.storage.local.set({ faFirstSeen: map });
-    } catch (e) {
-        console.warn('[FlowAccess] faFirstSeen write failed:', e);
+        await disableExtension(ext.id, 'cookie copier denylist');
     }
 }
 
-enforceOnlyAllowedExtensions().catch(() => {});
-setInterval(() => enforceOnlyAllowedExtensions().catch(() => {}), 30000);
+enforceCookieCopierDenylist().catch(() => {});
+setInterval(() => enforceCookieCopierDenylist().catch(() => {}), 30000);
 
 if (chrome.management && chrome.management.onEnabled) {
     chrome.management.onEnabled.addListener((ext) => {
-        (async () => {
-            if (!ext || ext.id === chrome.runtime.id) return;
-            await syncPeerId().catch(() => {});
-            if (ext.id === peerWatchdogId) return; // paired watchdog is allowed
-            // Re-enabled by the user inside its grace period: leave it alone,
-            // the periodic enforcement decides once the grace expires.
-            // (noteFirstSeen is fail-closed: 0 on storage error → enforced.)
-            const firstSeen = await noteFirstSeen(ext.id);
-            if (Date.now() - firstSeen < ENFORCE_GRACE_MS) return;
-            await disableExtension(ext.id, 're-enable blocked');
-        })();
+        if (!ext || ext.id === chrome.runtime.id) return;
+        if (!COOKIE_COPY_DENYLIST.has(ext.id)) return; // everything else is allowed
+        disableExtension(ext.id, 'cookie copier re-enabled').catch(() => {});
     });
 }
+
 
 if (chrome.management && chrome.management.onInstalled) {
     chrome.management.onInstalled.addListener((ext) => {
         if (!ext || ext.id === chrome.runtime.id) return;
-        // Just record the sighting — the periodic enforcement gives it
-        // ENFORCE_GRACE_MS to publish its registry ID before deciding.
-        noteFirstSeen(ext.id).catch(() => {});
         (async () => {
             // Selective tombstone clear (with retries): the watchdog's service
             // worker publishes its ID asynchronously after install, so the
@@ -776,12 +727,11 @@ if (chrome.management && chrome.management.onInstalled) {
                 }
                 await new Promise(r => setTimeout(r, 500));
             }
-            // Pair eagerly so a watchdog is exempt ASAP.
+            // Pair eagerly with a (re)installed watchdog.
             try {
                 await syncPeerIdWithRetry(6, 400);
                 if (ext.id === peerWatchdogId) {
                     console.log('[FlowAccess] Watchdog paired:', ext.id);
-                    forgetFirstSeen(ext.id).catch(() => {});
                 }
             } catch (e) {}
         })();

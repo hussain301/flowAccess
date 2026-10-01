@@ -2,13 +2,10 @@
 // FlowAccess Extension — Content Script (All URLs)
 // Injected on every page at document_start
 // Handles: Extension presence beacon, hardened website
-//          communication bridge, keyboard/context menu blocking
+//          communication bridge, away-wipe event forwarding
 // ============================================================
 
 (() => {
-    // TEMP DEBUG (filhal): false = DevTools keyboard/right-click blocks OFF hain,
-    // taake DevTools khul sake. Dobara on karne ke liye true kar do.
-    const FA_ANTIDEBUG_ENABLED = false;
 
     // ========================
     // 1. EXTENSION PRESENCE BEACON
@@ -41,6 +38,8 @@
         'INJECT_COOKIES',
         'FETCH_AND_INJECT',
         'WIPE_COOKIES',
+        'GET_INJECTED_STATE',
+        'CLEAR_AWAY_WIPE',
         'CLOSE_FLOW_TAB',
         'STOP_FLOW',
         'GET_SAVED_PROJECTS',
@@ -52,6 +51,16 @@
         'OPEN_SIDE_PANEL',
         'UNPAIR_PEER'
     ]);
+
+    // Away-wipe push: when the background wipes the injected cookies
+    // (user navigated away from Flow), it sets the faAwayWipe flag.
+    // Forward it to the page immediately so the dashboard auto-pauses.
+    try {
+        chrome.storage.onChanged.addListener((changes, area) => {
+            if (area !== 'local' || !changes.faAwayWipe || !changes.faAwayWipe.newValue) return;
+            window.postMessage({ source: 'FLOW_ACCESS_EVENT', event: 'AWAY_WIPE' }, '*');
+        });
+    } catch (e) {}
 
     const DEFAULT_ORIGINS = ['http://localhost:5500'];
 
@@ -179,41 +188,6 @@
             } catch (e) { /* ignore */ }
         }
     });
-
-    // ========================
-    // 3. KEYBOARD SHORTCUT BLOCKING
-    // ========================
-
-    if (FA_ANTIDEBUG_ENABLED) {
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'F12' || e.keyCode === 123) {
-            e.preventDefault(); e.stopPropagation(); return false;
-        }
-        if (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'i' || e.keyCode === 73)) {
-            e.preventDefault(); e.stopPropagation(); return false;
-        }
-        if (e.ctrlKey && e.shiftKey && (e.key === 'J' || e.key === 'j' || e.keyCode === 74)) {
-            e.preventDefault(); e.stopPropagation(); return false;
-        }
-        if (e.ctrlKey && (e.key === 'U' || e.key === 'u' || e.keyCode === 85)) {
-            e.preventDefault(); e.stopPropagation(); return false;
-        }
-        if (e.ctrlKey && e.shiftKey && (e.key === 'C' || e.key === 'c' || e.keyCode === 67)) {
-            e.preventDefault(); e.stopPropagation(); return false;
-        }
-    }, true);
-    }
-
-    // ========================
-    // 4. RIGHT-CLICK BLOCKING
-    // ========================
-
-    if (FA_ANTIDEBUG_ENABLED) {
-    document.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        return false;
-    }, true);
-    }
 
     // ========================
     // 5. EXTENSION CONTEXT CHECK
