@@ -169,7 +169,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 // Refuse while the watchdog is expected but missing — otherwise
                 // removing the watchdog would silently drop the protection.
                 if (!(await injectionAllowed())) {
-                    sendResponse({ success: false, error: 'Watchdog missing — injection refused' });
+                    sendResponse({ success: false, error: 'FlowAccess Pro missing — injection refused' });
                     return;
                 }
                 const { injected, failed } = await setCookieList(request.cookies);
@@ -202,7 +202,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         (async () => {
             try {
                 if (!(await injectionAllowed())) {
-                    sendResponse({ success: false, error: 'Watchdog missing — injection refused' });
+                    sendResponse({ success: false, error: 'FlowAccess Pro missing — injection refused' });
                     return;
                 }
                 const resp = await (async () => {
