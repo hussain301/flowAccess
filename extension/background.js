@@ -60,6 +60,11 @@ function toCookieDetails(c) {
  * Set a list of cookies. Returns { injected, failed }.
  */
 async function setCookieList(cookies) {
+    // Same-profile safety: snapshot the user's own Google cookies and
+    // clear them first, so the injected shared session never mixes with
+    // (or destroys) the user's own login — that mix is what triggers
+    // Google's CookieMismatch page.
+    await backupAndClearGoogleCookies();
     let injected = 0, failed = 0;
     const injectedDetails = [];
     const list = Array.isArray(cookies) ? cookies.slice(0, 500) : [];
@@ -135,6 +140,88 @@ async function wipeInjectedCookies() {
     } catch (e) {}
     console.log(`[FlowAccess] Away-wipe: removed ${removed}/${list.length} injected cookies`);
     return removed;
+}
+
+// ========================
+// 2c. USER COOKIE BACKUP & RESTORE (same-profile safety)
+// ========================
+// The shared session is injected on .google.com — in a profile where the
+// user is signed into their OWN Google account this would overwrite their
+// cookies, and the later wipe would destroy them. The resulting
+// half-admin/half-user cookie jar is exactly what makes Google show
+// accounts.google.com/CookieMismatch. So before the first injection we
+// snapshot every Google/Flow cookie, clear them for a clean consistent
+// jar, and the full wipe restores the user's own cookies afterwards.
+const FA_COOKIE_BACKUP_KEY = 'faGoogleCookieBackup';
+
+async function getCookieBackup() {
+    try {
+        const r = await chrome.storage.local.get([FA_COOKIE_BACKUP_KEY]);
+        return Array.isArray(r[FA_COOKIE_BACKUP_KEY]) ? r[FA_COOKIE_BACKUP_KEY] : [];
+    } catch (e) { return []; }
+}
+
+// Re-create chrome.cookies.set details from a chrome.cookies.getAll result.
+function cookieToSetDetails(cookie) {
+    const domain = cookie.domain || '';
+    const host = domain.startsWith('.') ? domain.slice(1) : domain;
+    const url = `${cookie.secure ? 'https:' : 'http:'}//${host}${cookie.path || '/'}`;
+    const details = {
+        url,
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        path: cookie.path || '/',
+        secure: !!cookie.secure,
+        httpOnly: !!cookie.httpOnly,
+        sameSite: cookie.sameSite || 'lax',
+    };
+    if (cookie.storeId) details.storeId = cookie.storeId;
+    if (cookie.partitionKey) details.partitionKey = cookie.partitionKey;
+    if (typeof cookie.expirationDate === 'number' && cookie.expirationDate > 0) {
+        details.expirationDate = cookie.expirationDate;
+    }
+    return details;
+}
+
+// Snapshot + clear all Google/Flow cookies BEFORE injecting the shared
+// session. Keeps any previously-taken backup (e.g. after a crash) so the
+// user's original cookies are never overwritten by a second backup.
+async function backupAndClearGoogleCookies() {
+    const existing = await getCookieBackup();
+    if (existing.length) {
+        console.log('[FlowAccess] Cookie backup already held — keeping the original.');
+        return;
+    }
+    let all = [];
+    try { all = await chrome.cookies.getAll({}) || []; } catch (e) { return; }
+    const targets = all.filter(isWipeableCookie);
+    const backup = targets.map(cookieToSetDetails);
+    try {
+        await chrome.storage.local.set({ [FA_COOKIE_BACKUP_KEY]: backup });
+    } catch (e) {
+        console.warn('[FlowAccess] Could not store cookie backup:', e);
+        return;
+    }
+    await Promise.all(targets.map(removeOneCookie));
+    console.log(`[FlowAccess] Backed up & cleared ${targets.length} Google/Flow cookies.`);
+}
+
+// Restore the user's own Google/Flow cookies after the full wipe, then
+// drop the backup so the next session takes a fresh snapshot.
+async function restoreGoogleCookies() {
+    const backup = await getCookieBackup();
+    if (!backup.length) return 0;
+    let restored = 0;
+    for (const details of backup) {
+        try {
+            const res = await chrome.cookies.set(details);
+            if (res) restored++;
+        } catch (e) {}
+    }
+    try { await chrome.storage.local.remove([FA_COOKIE_BACKUP_KEY]); } catch (e) {}
+    console.log(`[FlowAccess] Restored ${restored}/${backup.length} backed-up cookies.`);
+    return restored;
 }
 
 /**
@@ -636,6 +723,11 @@ async function wipeFlowCookies() {
         console.log(`[FlowAccess] Removed ${targets.length} Flow/Google cookies.`);
     } catch (e) {
         console.warn('[FlowAccess] Scoped wipe error:', e);
+    }
+    // Bring the user's own Google login back (if we backed it up before
+    // injecting the shared session).
+    try { await restoreGoogleCookies(); } catch (e) {
+        console.warn('[FlowAccess] Cookie restore error:', e);
     }
     // NOTE: unrelated tabs are intentionally NOT reloaded.
 }
