@@ -174,9 +174,9 @@ function setProtectionBadge(mode) {
     extensionStatusEl.innerHTML = `
       <div class="status-badge red">
         ${icon}<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
-        🛡️ Watchdog Removed
+        🛡️ FlowAccess Pro Removed
       </div>
-      <p class="ext-instruction">Re-install the FlowAccess Watchdog extension and reload this page.</p>
+      <p class="ext-instruction">Re-install the FlowAccess Pro extension and reload this page.</p>
       <p class="ext-instruction"><button id="fa-forget-watchdog" style="background:none;border:none;color:#60a5fa;text-decoration:underline;cursor:pointer;font-size:12px;padding:0;">Use without watchdog (single-extension mode)</button></p>
     `;
     const forgetBtn = document.getElementById('fa-forget-watchdog');
@@ -364,12 +364,12 @@ async function onWatchdogRemoved() {
   if (currentSessionId) {
     showProtectionOverlay({
       emoji: '🛡️',
-      title: 'Watchdog Removed',
-      body: 'The FlowAccess Watchdog was removed or disabled. The shared session has been <b>wiped and paused</b>.',
-      note: 'Re-install the FlowAccess Watchdog, then reload this page and press Resume.'
+      title: 'FlowAccess Pro Removed',
+      body: 'The FlowAccess Pro was removed or disabled. The shared session has been <b>wiped and paused</b>.',
+      note: 'Re-install FlowAccess Pro, then reload this page and press Resume.'
     });
   } else {
-    showToast("🛡️ FlowAccess Watchdog was removed or disabled.", "error");
+    showToast("🛡️ FlowAccess Pro was removed or disabled.", "error");
   }
 }
 
@@ -377,7 +377,7 @@ function onWatchdogRestored() {
   setProtectionBadge(mainAlive ? 'ready' : 'no-extension');
   hideProtectionOverlay();
   updateButtonStates();
-  showToast("🛡️ Watchdog restored.", "success");
+  showToast("🛡️ FlowAccess Pro restored.", "success");
 }
 
 let protectionOverlay = null;
@@ -682,7 +682,7 @@ function updateButtonStates() {
     pauseFlowBtn.style.display = 'none';
     resumeFlowBtn.style.display = 'none';
     startFlowBtn.disabled = true;
-    startFlowBtn.innerText = wdMissing ? "🛡️ Watchdog Required" : "⚠️ Extension Required";
+    startFlowBtn.innerText = wdMissing ? "🛡️ FlowAccess Pro Required" : "⚠️ Extension Required";
     startFlowBtn.style.background = '#6b7280';
     return;
   }
@@ -926,7 +926,7 @@ startFlowBtn.addEventListener('click', async () => {
       setProtectionBadge(prot.mainAlive ? 'no-watchdog' : 'no-extension');
       updateButtonStates();
       showToast(prot.mainAlive
-        ? "🛡️ FlowAccess Watchdog not detected. Re-install it and reload this page."
+        ? "🛡️ FlowAccess Pro not detected. Re-install it and reload this page."
         : "❌ FlowAccess extension not detected. Install/enable it and reload this page.", "error");
       return;
     }
@@ -1050,7 +1050,7 @@ resumeFlowBtn.addEventListener('click', async () => {
       setProtectionBadge(prot.mainAlive ? 'no-watchdog' : 'no-extension');
       updateButtonStates();
       showToast(prot.mainAlive
-        ? "🛡️ FlowAccess Watchdog not detected. Re-install it and reload this page."
+        ? "🛡️ FlowAccess Pro not detected. Re-install it and reload this page."
         : "❌ FlowAccess extension not detected. Install/enable it and reload this page.", "error");
       return;
     }
