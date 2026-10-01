@@ -417,6 +417,7 @@ let userUsageCache = {};  // userId -> last 24h used ms
 let userSearchTerm = '';
 let userCurrentPage = 0;
 let userSearchTimer = null;
+let serverUserResults = null; // local me na mile to Firebase se direct aaye hue results
 
 async function loadUsers() {
   try {
@@ -442,6 +443,8 @@ async function loadUsers() {
 window.loadUsers = loadUsers;
 
 function getFilteredUsers() {
+  // Firebase se direct aaye results hon to wahi dikhao
+  if (serverUserResults) return serverUserResults;
   const t = userSearchTerm.trim().toLowerCase();
   if (!t) return allUsersCache;
   return allUsersCache.filter(u =>
@@ -495,12 +498,27 @@ function renderUsersPage() {
   $('userNextBtn').disabled = userCurrentPage >= totalPages - 1;
 }
 
-// live search (debounced) — email ya name me kahin bhi match
+// live search (debounced) — pehle loaded list me dekho (frontend),
+// wahan na mile to Firebase se direct user nikalo
 window.onUserSearchInput = function(v) {
   clearTimeout(userSearchTimer);
-  userSearchTimer = setTimeout(() => {
+  userSearchTimer = setTimeout(async () => {
     userSearchTerm = v;
     userCurrentPage = 0;
+    serverUserResults = null;
+    const t = v.trim().toLowerCase();
+    if (t && !getFilteredUsers().length) {
+      try {
+        const q = query(collection(db, 'users'),
+          where('email', '>=', t),
+          where('email', '<=', t + '\uf8ff'),
+          limit(10));
+        const snap = await getDocs(q);
+        serverUserResults = [];
+        snap.forEach(d => serverUserResults.push({ id: d.id, data: d.data() }));
+        serverUserResults.sort((a, b) => (a.data.email || '').localeCompare(b.data.email || ''));
+      } catch(e) { console.error('User search error:', e); }
+    }
     renderUsersPage();
   }, 300);
 };
@@ -509,6 +527,7 @@ window.clearUserSearch = function() {
   $('userSearch').value = '';
   userSearchTerm = '';
   userCurrentPage = 0;
+  serverUserResults = null;
   renderUsersPage();
 };
 
