@@ -77,20 +77,25 @@ closeModalBtn.addEventListener('click', () => {
 
 // === Mobile browser extension-support check ===
 // On EVERY visit from a mobile browser that cannot run extensions, show a
-// note with a button to install Firefox (extension-capable).
-// Browsers with real extension support are left alone.
-// Research (2026): Firefox Android = full add-ons; Edge Android (EdgA) =
-// curated extensions; Kiwi / Yandex = Chrome extensions incl. unpacked.
-// No support: Chrome Android, Safari/iOS (Apple restriction), Samsung
-// Internet (content-blockers only), Opera, Vivaldi, in-app webviews.
+// note with a button to install Lemur Browser (the only Android browser that
+// loads our unpacked extension in developer mode).
+// Exempt: (1) any browser where our extension is actually running (ground
+// truth), (2) Lemur itself via UA or Chromium brand list, (3) desktop.
+// iOS: Apple allows no browser extensions at all — note without install btn.
 (function mobileExtCheck() {
   try {
     const ua = navigator.userAgent || '';
     if (!/Android|iPhone|iPad|iPod/i.test(ua)) return;           // desktop: skip
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
-    // Only Lemur Browser can actually load our unpacked extension in
-    // developer mode on Android — every other Android browser gets the popup.
-    const isLemur = /Lemur/i.test(ua);
+    // Ground truth first: if our extension is actually running in this
+    // browser, it can obviously load extensions — never show the popup.
+    if (document.documentElement.dataset.flowAccessExtension === 'true') return;
+    // Otherwise exempt only Lemur Browser (the one Android browser that can
+    // load our unpacked extension in developer mode). Lemur's UA string does
+    // NOT contain "Lemur", so also check the Chromium brand list.
+    const brands = (navigator.userAgentData && navigator.userAgentData.brands) || [];
+    const isLemur = /lemur/i.test(ua) ||
+      brands.some(b => /lemur/i.test((b && b.brand) || ''));
     if (isLemur && !isIOS) return;                               // supported: no popup
 
     const modal = document.getElementById('mobileExtModal');
