@@ -1037,12 +1037,12 @@ function renderSavedProjects(projects) {
     nameEl.title = url + ' — click to open';
     nameEl.textContent = label.length > 14 ? label.slice(0, 14) + '…' : label;
     nameEl.style.cursor = 'pointer';
-    nameEl.addEventListener('click', () => window.open(url, '_blank', 'noopener'));
+    nameEl.addEventListener('click', () => openProjectWithSession(url));
 
     const openBtn = document.createElement('button');
     openBtn.className = 'btn btn-primary btn-sm';
     openBtn.textContent = 'Open';
-    openBtn.addEventListener('click', () => window.open(url, '_blank', 'noopener'));
+    openBtn.addEventListener('click', () => openProjectWithSession(url));
 
     const delBtn = document.createElement('button');
     delBtn.className = 'btn btn-sm';
@@ -1064,6 +1064,65 @@ function renderSavedProjects(projects) {
 
 // NOTE: #newProjectBtn is a plain <a target="_blank"> link in dashboard.html,
 // so it opens Flow with zero JavaScript (immune to cache/JS/popup issues).
+
+// Project open rule:
+//  - Active session  -> open the project URL directly (cookies are live).
+//  - Paused session  -> resume (re-inject) first, then open the project.
+//  - No session      -> start (inject) first, then open the project.
+// Never open a project on a dead/paused session — it would load without
+// the shared access. The blank tab is opened synchronously inside the
+// click gesture so popup blockers don't eat the post-injection navigation;
+// it is closed again if the session fails to start/resume.
+let projectOpening = false;
+function waitForCondition(fn, timeoutMs) {
+  return new Promise(resolve => {
+    const started = Date.now();
+    const timer = setInterval(() => {
+      let ok = false;
+      try { ok = !!fn(); } catch (e) { /* ignore */ }
+      if (ok || Date.now() - started > timeoutMs) {
+        clearInterval(timer);
+        resolve(ok);
+      }
+    }, 500);
+  });
+}
+async function openProjectWithSession(url) {
+  // Active session: cookies are live — just open.
+  if (currentSessionId && !isPaused) {
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+  if (projectOpening) return;
+  const resuming = !!(currentSessionId && isPaused);
+  const btn = resuming ? resumeFlowBtn : startFlowBtn;
+  // Start/Resume disabled (daily limit, extension missing, already working...)
+  // — the button label already says why; surface it instead of doing nothing.
+  if (btn.disabled) {
+    const reason = (btn.innerText || '').replace(/[⏳🔄▶⏰⚠️🛡️❌]/g, '').trim();
+    showToast(reason ? `⚠️ ${reason}` : "⚠️ Session abhi start nahi ho sakta.", "error");
+    return;
+  }
+  const tab = window.open('about:blank', '_blank');
+  if (!tab) {
+    showToast("👆 Popup blocked — browser me popups allow karo, phir dobara try karo.", "error");
+    return;
+  }
+  projectOpening = true;
+  try {
+    showToast(resuming ? "🔄 Session resume ho raha hai..." : "⏳ Session start ho raha hai...", "success");
+    btn.click();
+    // The start/resume handler toasts the failure reason itself on error.
+    const ok = await waitForCondition(() => currentSessionId && !isPaused, 60000);
+    if (ok) {
+      tab.location.href = url;
+    } else {
+      try { tab.close(); } catch (e) { /* ignore */ }
+    }
+  } finally {
+    projectOpening = false;
+  }
+}
 
 // ========================================
 // START SESSION
