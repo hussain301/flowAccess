@@ -396,6 +396,7 @@ async function loadActiveEndpoint() {
 // while Flow stayed logged out).
 async function injectAccessCookies() {
   if (activeCookies && activeCookies.length) {
+    console.log('[Dashboard] DEBUG cookies object (INJECT_COOKIES):', activeCookies);
     const res = await requestFromExtension('INJECT_COOKIES', {
       cookies: activeCookies,
       sessionId: currentSessionId
@@ -407,6 +408,8 @@ async function injectAccessCookies() {
       endpointUrl: activeEndpointUrl,
       sessionId: currentSessionId
     });
+    console.log('[Dashboard] DEBUG cookies object (FETCH_AND_INJECT):', res && res.debugCookies);
+    console.log('[Dashboard] DEBUG raw endpoint response:', res && res.debugRaw);
     return normalizeInjectionResult(res, null);
   }
   return { ok: false, injected: 0, failed: 0, error: 'No active access config. Contact admin.' };

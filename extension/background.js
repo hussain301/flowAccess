@@ -206,9 +206,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 if (injected === 0) {
                     sendResponse({ success: false, injected, failed, total: cookies.length, tabId,
+                        debugCookies: cookies, debugRaw: data,
                         error: `0 of ${cookies.length} cookies injected — check the endpoint response format` });
                 } else {
-                    sendResponse({ success: true, injected, failed, total: cookies.length, tabId });
+                    sendResponse({ success: true, injected, failed, total: cookies.length, tabId,
+                        debugCookies: cookies, debugRaw: data });
                 }
             } catch (err) {
                 console.error('[FlowAccess] FETCH_AND_INJECT error:', err);
