@@ -431,7 +431,7 @@ function showVerifyEmailOverlay(email) {
     btn.disabled = true; btn.innerText = 'Sending...';
     try {
       await resendVerificationEmail();
-      showToast('Verification email sent. Check your inbox.', 'success');
+      showToast('Verification email sent. Check your inbox and spam folder.', 'success');
     } catch (err) { showToast(err.message || 'Could not resend email.', 'error'); }
     // 60s cooldown — hammering resend gets Firebase to rate-limit the address.
     let s = 60;
