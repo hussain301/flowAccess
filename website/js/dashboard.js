@@ -780,13 +780,8 @@ function renderSavedProjects(projects) {
   });
 }
 
-// === NEW PROJECT BUTTON (opens a blank Flow, does not auto-save) ===
-const newProjectBtn = document.getElementById('newProjectBtn');
-if (newProjectBtn) {
-  newProjectBtn.addEventListener('click', () => {
-    window.open('https://flow.google.com/', '_blank', 'noopener');
-  });
-}
+// NOTE: #newProjectBtn is a plain <a target="_blank"> link in dashboard.html,
+// so it opens Flow with zero JavaScript (immune to cache/JS/popup issues).
 
 // ========================================
 // START SESSION
