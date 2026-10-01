@@ -19,10 +19,41 @@
     // ============================
     let fakeBalance = 45000;
     let fakeModelName = '';
-    let savedProjects = [];   // max 3 project URLs, via 💾 Save Project
+    let projectHistory = [];  // 150 entries {url, name, savedAt} — background is source of truth
     let fakeEmail = null;     // per-user random gmail (replaces real account email)
     let fakeEmoji = null;     // per-user random avatar emoji
     let lastGenerateClick = 0;
+
+    // Talk to the background service worker (project history store, panel)
+    function bgSend(action, payload) {
+        return new Promise((resolve) => {
+            try {
+                chrome.runtime.sendMessage(Object.assign({ action }, payload || {}), (res) => {
+                    resolve(res || { success: false, error: 'No response' });
+                });
+            } catch (e) {
+                resolve({ success: false, error: e.message });
+            }
+        });
+    }
+
+    function refreshHistoryCache() {
+        return bgSend('PROJECT_LIST').then(res => {
+            if (res && res.success && Array.isArray(res.projects)) {
+                projectHistory = res.projects;
+            }
+            return projectHistory;
+        }).catch(() => projectHistory);
+    }
+
+    function isProjectSaved(url) {
+        const id = window.FaShared ? FaShared.projectIdOf(url) : null;
+        if (!id) return false;
+        return projectHistory.some(p => {
+            const pid = window.FaShared ? FaShared.projectIdOf(p.url) : null;
+            return pid === id;
+        });
+    }
 
     // Per-model generation cost (displayed + deducted)
     const creditMap = {
@@ -39,11 +70,9 @@
 
     if (typeof chrome !== 'undefined' && chrome.storage) {
         chrome.storage.local.get(
-            ['fakeBalance', 'faSavedProjects', 'savedProjectUrl', 'faFakeEmail', 'faFakeEmoji'],
+            ['fakeBalance', 'faFakeEmail', 'faFakeEmoji'],
             r => {
                 if (typeof r.fakeBalance === 'number') fakeBalance = r.fakeBalance;
-                if (Array.isArray(r.faSavedProjects)) savedProjects = r.faSavedProjects.slice(0, 3);
-                else if (r.savedProjectUrl) savedProjects = [r.savedProjectUrl]; // migrate legacy
                 if (typeof r.faFakeEmail === 'string' && r.faFakeEmail.includes('@')) fakeEmail = r.faFakeEmail;
                 if (typeof r.faFakeEmoji === 'string' && r.faFakeEmoji) fakeEmoji = r.faFakeEmoji;
                 if (!fakeEmail || !fakeEmoji) {
@@ -54,6 +83,9 @@
                 try { scheduleIdentitySweep(); } catch (e) {}
             }
         );
+        // Project history lives in the background (150 entries, deduped;
+        // legacy max-3 list is migrated there on first read).
+        refreshHistoryCache().catch(() => {});
     }
 
     // Per-user fake identity: random gmail + random avatar emoji,
@@ -160,6 +192,28 @@
         }
         #fa-save-btn:hover { background: #1557b0 !important; transform: translateY(-2px) !important; }
         #fa-save-btn.saved { background: #0d9488 !important; }
+
+        /* --- Projects Launcher (opens the side panel) --- */
+        #fa-projects-launcher {
+            position: fixed !important;
+            bottom: 20px !important;
+            left: 20px !important;
+            background: #3c4043 !important;
+            color: #e8eaed !important;
+            border: 1px solid #5f6368 !important;
+            padding: 10px 20px !important;
+            border-radius: 24px !important;
+            font-family: 'Google Sans', sans-serif !important;
+            font-size: 14px !important;
+            font-weight: 500 !important;
+            cursor: pointer !important;
+            z-index: 999999 !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.45) !important;
+            display: flex !important;
+            align-items: center !important;
+            gap: 8px !important;
+        }
+        #fa-projects-launcher:hover { background: #4d5156 !important; transform: translateY(-2px) !important; }
 
         /* --- Fake per-user avatar (replaces real Google profile photo) --- */
         .fa-fake-avatar {
@@ -285,9 +339,9 @@
                 return;
             }
 
-            if (savedProjects.length) {
-                const isSaved = savedProjects.some(sp => {
-                    const projectId = sp.split('/project/')[1];
+            if (projectHistory.length) {
+                const isSaved = projectHistory.some(p => {
+                    const projectId = window.FaShared ? FaShared.projectIdOf(p.url) : null;
                     return projectId && href.includes(projectId);
                 });
                 if (isSaved) {
@@ -371,20 +425,29 @@
     } catch (e) {}
 
     // ============================
-    // 4. SAVE PROJECT BUTTON (max 3)
+    // 4. SAVE PROJECT (150-entry history) + PROJECTS LAUNCHER
     // ============================
+    // Save is event-driven and deduplicated by the background store:
+    // clicking Save on an already-saved project just re-copies the link.
+    function currentProjectName(fallbackUrl) {
+        const t = (document.title || '').trim();
+        if (t && !/^flow$/i.test(t)) return t.split(' - ')[0].slice(0, 80);
+        const id = window.FaShared ? FaShared.projectIdOf(fallbackUrl) : null;
+        return id || 'Flow project';
+    }
+
     function showSaveButton() {
         if (document.getElementById('fa-save-btn')) return;
         const url = window.location.href;
         if (!/\/project\/[a-zA-Z0-9_\-]+/i.test(url)) return;
         if (!document.body) return;
 
-        const cleanUrl = getCleanUrl(url);
+        const cleanUrl = window.FaShared ? FaShared.cleanProjectUrl(url) : url;
         const btn = document.createElement('button');
         btn.id = 'fa-save-btn';
 
         const paint = () => {
-            if (savedProjects.includes(cleanUrl)) {
+            if (isProjectSaved(cleanUrl)) {
                 btn.textContent = '✅ Project Saved';
                 btn.classList.add('saved');
             } else {
@@ -394,32 +457,46 @@
         };
         paint();
 
-        btn.onclick = () => {
-            if (savedProjects.includes(cleanUrl)) { paint(); return; }
-            if (savedProjects.length >= 3) {
-                btn.textContent = '⚠️ Max 3 — remove one from dashboard';
-                btn.classList.remove('saved');
-                setTimeout(paint, 2500);
-                return;
+        btn.onclick = async () => {
+            const name = currentProjectName(cleanUrl);
+            const res = await bgSend('PROJECT_SAVE', { url: cleanUrl, name });
+            if (res && res.success) {
+                projectHistory = res.projects || projectHistory;
+                const formats = window.FaShared
+                    ? FaShared.projectCopyFormats({ url: cleanUrl, name })
+                    : { link: cleanUrl };
+                const copied = window.FaShared
+                    ? await FaShared.copyTextWithFallback(formats.link)
+                    : false;
+                btn.textContent = copied ? '✅ Saved & Copied!' : '✅ Saved';
+                btn.classList.add('saved');
+                setTimeout(paint, 2000);
+            } else {
+                btn.textContent = '⚠️ Save failed';
+                setTimeout(paint, 2000);
             }
-            savedProjects.push(cleanUrl);
-            if (typeof chrome !== 'undefined' && chrome.storage) {
-                chrome.storage.local.set({ faSavedProjects: savedProjects });
-            }
-            if (navigator.clipboard) navigator.clipboard.writeText(cleanUrl).catch(() => {});
-            btn.textContent = '✅ Saved & Copied!';
-            btn.classList.add('saved');
-            setTimeout(paint, 2000);
         };
         document.body.appendChild(btn);
     }
 
-    function getCleanUrl(url) {
-        try {
-            const p = new URL(url);
-            const m = p.pathname.match(/\/project\/[a-zA-Z0-9_\-]+/i);
-            return m ? `${p.origin}${m[0]}` : url;
-        } catch(e) { return url; }
+    // Floating launcher (bottom-left) — opens the projects side panel.
+    function showProjectsLauncher() {
+        if (document.getElementById('fa-projects-launcher')) return;
+        if (!document.body) return;
+        const btn = document.createElement('button');
+        btn.id = 'fa-projects-launcher';
+        btn.textContent = '📁 Projects';
+        btn.title = 'Open saved projects';
+        btn.onclick = async () => {
+            btn.textContent = '⏳…';
+            const res = await bgSend('OPEN_SIDE_PANEL');
+            btn.textContent = '📁 Projects';
+            if (!res || !res.success) {
+                btn.textContent = '⚠️ Failed';
+                setTimeout(() => { btn.textContent = '📁 Projects'; }, 2000);
+            }
+        };
+        document.body.appendChild(btn);
     }
 
     // ============================
@@ -469,11 +546,25 @@
     // ============================
     // INIT
     // ============================
+    // Event-driven auto-save: visiting a project page records it in the
+    // 150-entry history (deduplicated by the background store).
+    function autoSaveCurrentProject() {
+        const url = window.location.href;
+        if (!/\/project\/[a-zA-Z0-9_\-]+/i.test(url)) return;
+        if (isProjectSaved(url)) return;
+        const cleanUrl = window.FaShared ? FaShared.cleanProjectUrl(url) : url;
+        bgSend('PROJECT_SAVE', { url: cleanUrl, name: currentProjectName(cleanUrl) })
+            .then(res => { if (res && res.success) projectHistory = res.projects || projectHistory; })
+            .catch(() => {});
+    }
+
     function init() {
         watchCredits();
         renderFakeCredits();
         detectModel();
         showSaveButton();
+        showProjectsLauncher();
+        autoSaveCurrentProject();
         applyFakeIdentity();
         blurOtherProjects();
     }

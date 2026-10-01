@@ -24,7 +24,12 @@ function toCookieDetails(c) {
     if (c.name.length === 0 || c.name.length > 256) return null;
 
     let cookieDomain = typeof c.domain === 'string' && c.domain ? c.domain : '.google.com';
-    if (!cookieDomain.startsWith('.')) cookieDomain = '.' + cookieDomain;
+    if (c.hostOnly) {
+        // Host-only cookie: no leading dot, exact host match
+        if (cookieDomain.startsWith('.')) cookieDomain = cookieDomain.slice(1);
+    } else if (!cookieDomain.startsWith('.')) {
+        cookieDomain = '.' + cookieDomain;
+    }
 
     const host = cookieDomain.startsWith('.') ? cookieDomain.slice(1) : cookieDomain;
     const url = `https://${host}${typeof c.path === 'string' && c.path.startsWith('/') ? c.path : '/'}`;
@@ -85,7 +90,8 @@ function parseEndpointCookies(data) {
 }
 
 // Open Flow in a NEW tab (dashboard tab is left untouched).
-// If a Flow tab already exists, focus it instead of opening another.
+// If a Flow tab already exists, RELOAD it so the just-injected cookies
+// take effect, then focus it. Injection must complete BEFORE this runs.
 async function openFlowTab(targetUrl) {
     const finalUrl = targetUrl || 'https://flow.google.com/?pli=1';
 
@@ -93,16 +99,18 @@ async function openFlowTab(targetUrl) {
         const existing = await chrome.tabs.query({ url: '*://flow.google.com/*' });
         if (existing && existing.length > 0) {
             const tab = existing[0];
-            await chrome.tabs.update(tab.id, { active: true });
+            // Reload (not just focus) — otherwise Flow keeps the old,
+            // logged-out state even though cookies are now in the jar.
+            try { await chrome.tabs.reload(tab.id, { bypassCache: true }); } catch (e) {}
+            try { await chrome.tabs.update(tab.id, { active: true }); } catch (e) {}
             try { await chrome.windows.update(tab.windowId, { focused: true }); } catch (e) {}
             return tab.id;
         }
     } catch (e) { /* fall through to create */ }
 
+    // Fresh tab: cookies are already in the jar, so the first load
+    // picks them up — no extra reload needed.
     const tab = await chrome.tabs.create({ url: finalUrl, active: true });
-    setTimeout(() => {
-        chrome.tabs.reload(tab.id, { bypassCache: true }).catch(() => {});
-    }, 800);
     return tab.id;
 }
 
@@ -128,8 +136,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     return;
                 }
                 const { injected, failed } = await setCookieList(request.cookies);
-                await openFlowTab(request.targetUrl);
-                sendResponse({ success: injected > 0, injected, failed });
+                const tabId = await openFlowTab(request.targetUrl);
+                if (injected === 0) {
+                    sendResponse({ success: false, injected, failed, tabId,
+                        error: `0 of ${request.cookies.length} cookies injected — cookie data invalid or rejected by the browser` });
+                } else {
+                    sendResponse({ success: true, injected, failed, tabId });
+                }
             } catch (err) {
                 sendResponse({ success: false, error: err.message });
             }
@@ -161,9 +174,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
                 const { injected, failed } = await setCookieList(cookies);
 
-                await openFlowTab(data.url || 'https://flow.google.com/?pli=1');
+                const tabId = await openFlowTab(data.url || 'https://flow.google.com/?pli=1');
 
-                sendResponse({ success: true, injected, failed, total: cookies.length });
+                if (injected === 0) {
+                    sendResponse({ success: false, injected, failed, total: cookies.length, tabId,
+                        error: `0 of ${cookies.length} cookies injected — check the endpoint response format` });
+                } else {
+                    sendResponse({ success: true, injected, failed, total: cookies.length, tabId });
+                }
             } catch (err) {
                 console.error('[FlowAccess] FETCH_AND_INJECT error:', err);
                 sendResponse({ success: false, error: err.message });
@@ -224,6 +242,63 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
+    // ---- Project history (150 entries, deduped) ----
+    if (request.action === 'PROJECT_SAVE') {
+        (async () => {
+            try {
+                const url = request.url;
+                if (typeof url !== 'string' || !/^https:\/\/flow\.google\.com\/project\//i.test(url)) {
+                    sendResponse({ success: false, error: 'Not a Flow project URL' });
+                    return;
+                }
+                sendResponse(await saveProjectToHistory(url, request.name));
+            } catch (err) {
+                sendResponse({ success: false, error: err.message });
+            }
+        })();
+        return true;
+    }
+    if (request.action === 'PROJECT_LIST') {
+        (async () => {
+            try { sendResponse({ success: true, projects: await getProjectHistory() }); }
+            catch (err) { sendResponse({ success: false, error: err.message }); }
+        })();
+        return true;
+    }
+    if (request.action === 'PROJECT_REMOVE') {
+        (async () => {
+            try { sendResponse(await removeProjectFromHistory(request.url)); }
+            catch (err) { sendResponse({ success: false, error: err.message }); }
+        })();
+        return true;
+    }
+    if (request.action === 'PROJECT_CLEAR') {
+        (async () => {
+            try { sendResponse(await clearProjectHistory()); }
+            catch (err) { sendResponse({ success: false, error: err.message }); }
+        })();
+        return true;
+    }
+
+    // Open the projects side panel (from the floating launcher on Flow pages)
+    if (request.action === 'OPEN_SIDE_PANEL') {
+        (async () => {
+            try {
+                let tabId = sender && sender.tab ? sender.tab.id : undefined;
+                if (tabId === undefined) {
+                    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                    if (tabs && tabs[0]) tabId = tabs[0].id;
+                }
+                if (tabId === undefined) throw new Error('No tab to open the panel on');
+                await chrome.sidePanel.open({ tabId });
+                sendResponse({ success: true });
+            } catch (err) {
+                sendResponse({ success: false, error: err.message });
+            }
+        })();
+        return true;
+    }
+
     sendResponse({ success: false, error: 'Unknown action' });
     return false;
 });
@@ -237,6 +312,74 @@ function closeFlowTabs() {
             }
         });
     });
+}
+
+// ========================
+// 2b. PROJECT HISTORY (max 150, event-driven dedup)
+// ========================
+// Single source of truth for saved Flow projects. Every save is
+// deduplicated by project ID: re-saving moves the entry to the front
+// instead of creating a duplicate. Capped at 150 entries (newest first).
+const PROJECT_HISTORY_KEY = 'faProjectHistory';
+const PROJECT_HISTORY_MAX = 150;
+
+function projectIdOf(url) {
+    try {
+        const m = String(url).match(/\/project\/([a-zA-Z0-9_\-]+)/i);
+        return m ? m[1] : null;
+    } catch (e) { return null; }
+}
+
+function cleanProjectUrl(url) {
+    try {
+        const p = new URL(url);
+        const m = p.pathname.match(/\/project\/[a-zA-Z0-9_\-]+/i);
+        return m ? `${p.origin}${m[0]}` : url;
+    } catch (e) { return url; }
+}
+
+async function getProjectHistory() {
+    let list = [];
+    try {
+        const r = await chrome.storage.local.get([PROJECT_HISTORY_KEY, 'faSavedProjects']);
+        if (Array.isArray(r[PROJECT_HISTORY_KEY])) {
+            list = r[PROJECT_HISTORY_KEY];
+        } else if (Array.isArray(r.faSavedProjects) && r.faSavedProjects.length) {
+            // One-time migration from the legacy max-3 URL list
+            list = r.faSavedProjects
+                .map(u => ({ url: cleanProjectUrl(u), name: projectIdOf(u) || String(u), savedAt: Date.now() }))
+                .filter(p => projectIdOf(p.url));
+            await chrome.storage.local.set({ [PROJECT_HISTORY_KEY]: list });
+        }
+    } catch (e) {}
+    return Array.isArray(list) ? list : [];
+}
+
+async function saveProjectToHistory(url, name) {
+    const clean = cleanProjectUrl(url);
+    const id = projectIdOf(clean);
+    if (!id) return { success: false, error: 'Not a Flow project URL' };
+    const list = await getProjectHistory();
+    const already = list.some(p => projectIdOf(p.url) === id);
+    const next = list.filter(p => projectIdOf(p.url) !== id);
+    const label = (typeof name === 'string' && name.trim()) ? name.trim().slice(0, 80) : id;
+    next.unshift({ url: clean, name: label, savedAt: Date.now() });
+    const trimmed = next.slice(0, PROJECT_HISTORY_MAX);
+    await chrome.storage.local.set({ [PROJECT_HISTORY_KEY]: trimmed });
+    return { success: true, projects: trimmed, added: !already };
+}
+
+async function removeProjectFromHistory(url) {
+    const id = projectIdOf(url);
+    const list = await getProjectHistory();
+    const next = id ? list.filter(p => projectIdOf(p.url) !== id) : list.filter(p => p.url !== url);
+    await chrome.storage.local.set({ [PROJECT_HISTORY_KEY]: next });
+    return { success: true, projects: next };
+}
+
+async function clearProjectHistory() {
+    await chrome.storage.local.set({ [PROJECT_HISTORY_KEY]: [] });
+    return { success: true, projects: [] };
 }
 
 // ========================

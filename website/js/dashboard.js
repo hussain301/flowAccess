@@ -355,23 +355,38 @@ async function loadActiveEndpoint() {
   }
 }
 
-// Inject Flow access: direct Firebase cookies first, endpoint fetch second.
-function injectAccessCookies() {
+// Inject Flow access and AWAIT the result: { ok, injected, failed, error }.
+// The Firestore session must only start when ok === true — starting it
+// on a failed injection was the "cookies not injecting" bug (session ran
+// while Flow stayed logged out).
+async function injectAccessCookies() {
   if (activeCookies && activeCookies.length) {
-    sendToExtension('INJECT_COOKIES', {
+    const res = await requestFromExtension('INJECT_COOKIES', {
       cookies: activeCookies,
       sessionId: currentSessionId
     });
-    return true;
+    return normalizeInjectionResult(res, activeCookies.length);
   }
   if (activeEndpointUrl) {
-    sendToExtension('FETCH_AND_INJECT', {
+    const res = await requestFromExtension('FETCH_AND_INJECT', {
       endpointUrl: activeEndpointUrl,
       sessionId: currentSessionId
     });
-    return true;
+    return normalizeInjectionResult(res, null);
   }
-  return false;
+  return { ok: false, injected: 0, failed: 0, error: 'No active access config. Contact admin.' };
+}
+
+function normalizeInjectionResult(res, total) {
+  if (!res) return { ok: false, injected: 0, failed: 0, error: 'Extension not responding' };
+  if (res.success && (res.injected || 0) > 0) {
+    return { ok: true, injected: res.injected, failed: res.failed || 0 };
+  }
+  const err = res.error ||
+    ('0 of ' + (res.total || total || '?') + ' cookies injected' +
+     (res.failed ? ' (' + res.failed + ' failed)' : '') +
+     ' — check the endpoint response format');
+  return { ok: false, injected: res.injected || 0, failed: res.failed || 0, error: err };
 }
 
 // === LOAD USAGE DATA ===
@@ -661,7 +676,7 @@ window.addEventListener('message', (event) => {
   }
 });
 
-// === SAVED PROJECTS (max 3, stored by the extension) ===
+// === SAVED PROJECTS (150-entry history, stored by the extension) ===
 const savedProjectsListEl = document.getElementById('savedProjectsList');
 const savedProjectsCountEl = document.getElementById('savedProjectsCount');
 
@@ -670,23 +685,25 @@ async function loadSavedProjects() {
   if (res && res.success && Array.isArray(res.projects)) {
     renderSavedProjects(res.projects);
   } else {
-    savedProjectsCountEl.textContent = '0/3';
+    savedProjectsCountEl.textContent = '0/150';
     savedProjectsListEl.innerHTML =
       '<p style="color: var(--text-muted); font-size: 0.875rem;">Install the FlowAccess extension to save projects.</p>';
   }
 }
 
 function renderSavedProjects(projects) {
-  savedProjectsCountEl.textContent = projects.length + '/3';
+  savedProjectsCountEl.textContent = projects.length + '/150';
   if (!projects.length) {
     savedProjectsListEl.innerHTML =
       '<p style="color: var(--text-muted); font-size: 0.875rem;">No saved projects yet.</p>';
     return;
   }
   savedProjectsListEl.innerHTML = '';
-  projects.forEach((url) => {
+  projects.forEach((p) => {
+    const url = typeof p === 'string' ? p : p.url;
     const m = url.match(/\/project\/([a-zA-Z0-9_\-]+)/);
-    const label = m ? m[1] : url;
+    const id = m ? m[1] : url;
+    const label = (typeof p === 'object' && p.name) ? p.name : id;
     const row = document.createElement('div');
     row.className = 'saved-project-row';
 
@@ -754,8 +771,19 @@ startFlowBtn.addEventListener('click', async () => {
     isExtensionReady = true;
     setProtectionBadge('ready');
     hideProtectionOverlay();
-    
-    // 1. Create session in Firestore
+
+    // 1. Inject cookies FIRST and await the result — never create a
+    //    session when injection failed.
+    startFlowBtn.innerText = "⏳ Injecting access...";
+    const inj = await injectAccessCookies();
+    if (!inj.ok) {
+      showToast("❌ " + (inj.error || "Cookie injection failed"), "error");
+      startFlowBtn.disabled = false;
+      startFlowBtn.innerText = "▶ Access Flow";
+      return;
+    }
+
+    // 2. Create session in Firestore (only after injection succeeded)
     const sessionRef = await addDoc(collection(db, 'sessions'), {
       userId: currentUser.uid,
       userEmail: currentUser.email,
@@ -767,15 +795,13 @@ startFlowBtn.addEventListener('click', async () => {
       lastHeartbeat: serverTimestamp(),
       status: 'Active'
     });
-    
+
     currentSessionId = sessionRef.id;
     isPaused = false;
-    
-    // 2. Tell extension to setup access and open Flow (all behind the scenes)
-    injectAccessCookies();
-    
-    // 3. Start countdown timer + heartbeat
-    showToast("✅ Session started! Opening Flow...", "success");
+
+    // 3. Start countdown timer + heartbeat (Flow tab was opened/reloaded
+    //    by the extension after the cookies were injected)
+    showToast(`✅ Session started! ${inj.injected} cookies injected. Opening Flow...`, "success");
     startTimer();
     startHeartbeat();
     updateButtonStates();
@@ -870,9 +896,17 @@ resumeFlowBtn.addEventListener('click', async () => {
     setProtectionBadge('ready');
     hideProtectionOverlay();
 
-    // 1. Re-inject cookies and open Flow
-    injectAccessCookies();
-    
+    // 1. Re-inject cookies and await the result — never resume the
+    //    session when injection failed.
+    resumeFlowBtn.innerText = "⏳ Injecting access...";
+    const inj = await injectAccessCookies();
+    if (!inj.ok) {
+      showToast("❌ " + (inj.error || "Cookie injection failed"), "error");
+      resumeFlowBtn.disabled = false;
+      resumeFlowBtn.innerText = "▶ Resume Session";
+      return;
+    }
+
     // 2. Create new session (old one was paused with duration saved)
     const sessionRef = await addDoc(collection(db, 'sessions'), {
       userId: currentUser.uid,

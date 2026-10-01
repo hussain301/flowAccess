@@ -40,7 +40,12 @@
         'CLOSE_FLOW_TAB',
         'STOP_FLOW',
         'GET_SAVED_PROJECTS',
-        'REMOVE_SAVED_PROJECT'
+        'REMOVE_SAVED_PROJECT',
+        'PROJECT_SAVE',
+        'PROJECT_LIST',
+        'PROJECT_REMOVE',
+        'PROJECT_CLEAR',
+        'OPEN_SIDE_PANEL'
     ]);
 
     const DEFAULT_ORIGINS = ['http://localhost:5500'];
@@ -92,6 +97,19 @@
             if (payload.endpointUrl.length > 2048) return 'endpointUrl too long';
         }
 
+        const PROJECT_URL_RE = /^https:\/\/flow\.google\.com\/project\/[a-zA-Z0-9_\-]+/i;
+        if (action === 'PROJECT_SAVE') {
+            if (typeof payload.url !== 'string' || !PROJECT_URL_RE.test(payload.url))
+                return 'url must be a Flow project URL';
+            if (payload.url.length > 2048) return 'url too long';
+            if (payload.name !== undefined && (typeof payload.name !== 'string' || payload.name.length > 120))
+                return 'name must be a short string';
+        }
+        if (action === 'PROJECT_REMOVE') {
+            if (typeof payload.url !== 'string' || !PROJECT_URL_RE.test(payload.url))
+                return 'url must be a Flow project URL';
+        }
+
         return null; // OK
     }
 
@@ -115,27 +133,21 @@
 
             const { action, payload } = event.data;
 
-            // 2a. Local storage actions — handled here, never forwarded
-            if (action === 'GET_SAVED_PROJECTS') {
-                chrome.storage.local.get(['faSavedProjects'], (r) => {
-                    const list = Array.isArray(r.faSavedProjects) ? r.faSavedProjects : [];
-                    reply({ success: true, projects: list });
-                });
+            // 2a. Project history — forwarded to the background store
+            // (single source of truth; 150 entries, deduped by project ID)
+            if (action === 'GET_SAVED_PROJECTS' || action === 'PROJECT_LIST') {
+                const response = await chrome.runtime.sendMessage({ action: 'PROJECT_LIST' });
+                reply(response);
                 return;
             }
-            if (action === 'REMOVE_SAVED_PROJECT') {
+            if (action === 'REMOVE_SAVED_PROJECT' || action === 'PROJECT_REMOVE') {
                 const url = payload && payload.url;
                 if (typeof url !== 'string' || !/^https:\/\/flow\.google\.com\/project\//i.test(url)) {
                     reply({ success: false, error: 'Invalid project url' });
                     return;
                 }
-                chrome.storage.local.get(['faSavedProjects'], (r) => {
-                    const list = Array.isArray(r.faSavedProjects) ? r.faSavedProjects : [];
-                    const next = list.filter(p => p !== url);
-                    chrome.storage.local.set({ faSavedProjects: next }, () => {
-                        reply({ success: true, projects: next });
-                    });
-                });
+                const response = await chrome.runtime.sendMessage({ action: 'PROJECT_REMOVE', url });
+                reply(response);
                 return;
             }
 
