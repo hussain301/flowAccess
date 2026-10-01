@@ -152,7 +152,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     sendResponse({ success: false, error: 'Watchdog missing — injection refused' });
                     return;
                 }
-                const resp = await fetch(endpointUrl);
+                const resp = await (async () => {
+                    // Hard timeout: a dead/hanging endpoint must never leave
+                    // the dashboard stuck on "Injecting access...".
+                    const ctrl = new AbortController();
+                    const fetchTimer = setTimeout(() => ctrl.abort(), 15000);
+                    try {
+                        return await fetch(endpointUrl, { signal: ctrl.signal });
+                    } catch (err) {
+                        if (err && err.name === 'AbortError') {
+                            throw new Error('Cookie endpoint timed out after 15s — check the URL in admin panel');
+                        }
+                        throw err;
+                    } finally {
+                        clearTimeout(fetchTimer);
+                    }
+                })();
                 if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
                 const data = await resp.json();
 

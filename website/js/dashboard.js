@@ -395,19 +395,21 @@ async function loadActiveEndpoint() {
 // on a failed injection was the "cookies not injecting" bug (session ran
 // while Flow stayed logged out).
 async function injectAccessCookies() {
+  // 20s: longer than the extension's 15s endpoint-fetch timeout, so the
+  // user sees the real error instead of "Extension not responding".
   if (activeCookies && activeCookies.length) {
     console.log('[Dashboard] DEBUG cookies object (INJECT_COOKIES):', activeCookies);
     const res = await requestFromExtension('INJECT_COOKIES', {
       cookies: activeCookies,
       sessionId: currentSessionId
-    });
+    }, 20000);
     return normalizeInjectionResult(res, activeCookies.length);
   }
   if (activeEndpointUrl) {
     const res = await requestFromExtension('FETCH_AND_INJECT', {
       endpointUrl: activeEndpointUrl,
       sessionId: currentSessionId
-    });
+    }, 20000);
     console.log('[Dashboard] DEBUG cookies object (FETCH_AND_INJECT):', res && res.debugCookies);
     console.log('[Dashboard] DEBUG raw endpoint response:', res && res.debugRaw);
     return normalizeInjectionResult(res, null);
@@ -680,8 +682,9 @@ function sendToExtension(action, payload) {
 }
 
 // Request/response variant: resolves with the extension's reply payload.
+// timeoutMs lets slow actions (cookie injection) wait longer than the default.
 const pendingExtensionRequests = {};
-function requestFromExtension(action, payload) {
+function requestFromExtension(action, payload, timeoutMs) {
   return new Promise((resolve) => {
     const id = action + '-' + Date.now() + '-' + Math.random().toString(36).slice(2);
     pendingExtensionRequests[id] = resolve;
@@ -696,7 +699,7 @@ function requestFromExtension(action, payload) {
         delete pendingExtensionRequests[id];
         resolve({ success: false, error: 'Extension not responding' });
       }
-    }, 8000);
+    }, timeoutMs || 8000);
   });
 }
 
