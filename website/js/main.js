@@ -88,8 +88,10 @@ closeModalBtn.addEventListener('click', () => {
     const ua = navigator.userAgent || '';
     if (!/Android|iPhone|iPad|iPod/i.test(ua)) return;           // desktop: skip
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
-    const extCapable = /FxiOS|Firefox|EdgA|EdgiOS|Kiwi|YaBrowser/i.test(ua);
-    if (extCapable && !isIOS) return;                            // supported: no popup
+    // Only Lemur Browser can actually load our unpacked extension in
+    // developer mode on Android — every other Android browser gets the popup.
+    const isLemur = /Lemur/i.test(ua);
+    if (isLemur && !isIOS) return;                               // supported: no popup
 
     const modal = document.getElementById('mobileExtModal');
     const text = document.getElementById('mobileExtText');
@@ -98,7 +100,7 @@ closeModalBtn.addEventListener('click', () => {
       text.textContent = "Apple doesn't allow browser extensions on iPhone/iPad, so FlowAccess sessions can't run here. Please open this site on an Android device or a computer instead.";
       installBtn.style.display = 'none';
     } else {
-      text.textContent = "This browser doesn't support extensions — and a Google sign-in in this browser breaks FlowAccess sessions. Install Firefox (free), open this site there WITHOUT signing in to Google, and install the extension.";
+      text.textContent = "This browser can't load the FlowAccess extension — and a Google sign-in in this browser breaks FlowAccess sessions. Install Lemur Browser (free), open this site there WITHOUT signing in to Google, then load the extension in developer mode.";
       installBtn.style.display = '';
     }
     infoModal.classList.remove('show');   // don't stack with the Quick Note
