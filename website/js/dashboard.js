@@ -47,6 +47,21 @@ onAuthChange(async (user) => {
     window.location.href = 'index.html';
     return;
   }
+  // Server check: the saved session may belong to a user that no longer
+  // exists (deleted/disabled) in Firebase Auth. Force a token refresh —
+  // this hits the Firebase server. If the user isn't there, log out.
+  try {
+    await user.getIdToken(true);
+  } catch (e) {
+    const code = e && e.code ? String(e.code) : '';
+    if (code === 'auth/user-token-expired' || code === 'auth/user-disabled' ||
+        code === 'auth/invalid-user-token' || code === 'auth/user-not-found') {
+      try { await logoutUser(); } catch (_) {}
+      window.location.href = 'index.html';
+      return;
+    }
+    // Transient error (e.g. offline) — let Firebase retry on its own.
+  }
   currentUser = user;
   userEmailEl.innerText = user.email;
 
@@ -403,8 +418,14 @@ function showVerifyEmailOverlay(email) {
       <p style="margin:0 0 20px;color:#9ca3af;font-size:13px;line-height:1.6;">Sessions stay locked until your Gmail is verified.</p>
       <button id="fa-verify-resend" style="background:#3b82f6;color:#fff;border:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;margin-right:8px;">↻ Resend email</button>
       <button id="fa-verify-done" style="background:#10b981;color:#fff;border:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;">✓ I've verified</button>
+      <div style="margin-top:16px;"><a href="#" id="fa-verify-signout" style="color:#9ca3af;font-size:13px;text-decoration:underline;cursor:pointer;">Sign out</a></div>
     </div>`;
   document.body.appendChild(verifyEmailOverlay);
+  verifyEmailOverlay.querySelector('#fa-verify-signout').addEventListener('click', async (e) => {
+    e.preventDefault();
+    try { await logoutUser(); } catch (_) {}
+    window.location.href = 'index.html';
+  });
   verifyEmailOverlay.querySelector('#fa-verify-resend').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
     btn.disabled = true; btn.innerText = 'Sending...';
