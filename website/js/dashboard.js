@@ -74,7 +74,24 @@ onAuthChange(async (user) => {
   hideVerifyEmailOverlay();
   
   try {
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    let userDoc = await getDoc(doc(db, 'users', user.uid));
+    if (!userDoc.exists()) {
+      // Self-heal: the account exists in Firebase Auth but its profile
+      // document was never written (e.g. an interrupted registration).
+      // Users may create only their own document, so write it with defaults.
+      try {
+        await setDoc(doc(db, 'users', user.uid), {
+          email: user.email,
+          displayName: user.displayName || user.email,
+          createdAt: serverTimestamp(),
+          isBanned: false,
+          totalUsageMinutes: 0
+        });
+        userDoc = await getDoc(doc(db, 'users', user.uid));
+      } catch (e) {
+        console.error('Error creating user profile:', e);
+      }
+    }
     if (userDoc.exists()) {
       const userData = userDoc.data();
       userNameEl.innerText = userData.displayName || user.email;
