@@ -578,25 +578,6 @@
         return null;
     }
 
-    function faShowModelNotice(msg) {
-        try {
-            let n = document.getElementById('fa-model-notice');
-            if (!n) {
-                n = document.createElement('div');
-                n.id = 'fa-model-notice';
-                n.style.cssText = 'position:fixed;left:50%;bottom:88px;transform:translateX(-50%);' +
-                    'background:#1f1f24;color:#fff;font:13px/1.5 system-ui,sans-serif;' +
-                    'padding:10px 16px;border-radius:10px;z-index:2147483647;' +
-                    'box-shadow:0 4px 18px rgba(0,0,0,.5);max-width:90vw;text-align:center;';
-                document.documentElement.appendChild(n);
-            }
-            n.textContent = msg;
-            n.style.display = 'block';
-            clearTimeout(n._t);
-            n._t = setTimeout(() => { n.style.display = 'none'; }, 4500);
-        } catch (e) {}
-    }
-
     function faWatchModelSelect() {
         // Register once: init() can run again on SPA navigation.
         if (window.__faModelWatch) return;
@@ -621,7 +602,6 @@
                 e.stopPropagation();
                 target.click();
                 console.log('[FlowAccess] model auto-switched to', FA_TARGET_MODEL);
-                faShowModelNotice('Credits available nahi — "' + FA_TARGET_MODEL + '" select kiya gaya');
             } catch (err) {}
         }, true);
     }
