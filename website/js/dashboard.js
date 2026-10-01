@@ -41,6 +41,15 @@ const progressCircle = document.getElementById('progressCircle');
 const historyTableBody = document.getElementById('historyTableBody');
 const toastContainer = document.getElementById('toastContainer');
 
+// Welcome must show a real name, never a raw email address. If the
+// stored displayName is missing or is itself an email (older
+// admin-created profiles), prettify the email prefix instead.
+function friendlyName(displayName, email) {
+  if (displayName && displayName.indexOf('@') === -1) return displayName;
+  const prefix = String(email || '').split('@')[0] || 'User';
+  return prefix.charAt(0).toUpperCase() + prefix.slice(1);
+}
+
 // === AUTH STATE ===
 onAuthChange(async (user) => {
   if (!user) {
@@ -94,7 +103,7 @@ onAuthChange(async (user) => {
     }
     if (userDoc.exists()) {
       const userData = userDoc.data();
-      userNameEl.innerText = userData.displayName || user.email;
+      userNameEl.innerText = friendlyName(userData.displayName, user.email);
       
       // Ban check
       if (userData.isBanned) {
@@ -197,7 +206,9 @@ function setProtectionBadge(mode) {
         🛡️ FlowAccess Pro Removed
       </div>
       <p class="ext-instruction">Re-install the FlowAccess Pro extension and reload this page.</p>
-      <p class="ext-instruction"><a class="btn btn-primary" href="${FA_PRO_ZIP_URL}" download style="font-size:13px;padding:0.5rem 1rem;">⬇️ Download FlowAccess Pro</a></p>
+      <div class="fa-dl-row">
+        <a class="btn btn-primary fa-dl-btn" href="${FA_PRO_ZIP_URL}" download>⬇️ Download FlowAccess Pro</a>
+      </div>
       <p class="ext-instruction" style="font-size:11px;opacity:0.75;">Unzip it, open chrome://extensions, enable Developer mode, then "Load unpacked".</p>
       <p class="ext-instruction"><button id="fa-forget-watchdog" style="background:none;border:none;color:#60a5fa;text-decoration:underline;cursor:pointer;font-size:12px;padding:0;">Use without watchdog (single-extension mode)</button></p>
     `;
@@ -217,10 +228,10 @@ function setProtectionBadge(mode) {
         Extension Not Detected
       </div>
       <p class="ext-instruction">Please install and enable the FlowAccess extension.</p>
-      <p class="ext-instruction">
-        <a class="btn btn-primary" href="${FA_TOOL_ZIP_URL}" download style="font-size:13px;padding:0.5rem 1rem;margin-right:0.5rem;">⬇️ Download FlowAccess Tool</a>
-        <a class="btn btn-primary" href="${FA_PRO_ZIP_URL}" download style="font-size:13px;padding:0.5rem 1rem;">⬇️ Download FlowAccess Pro</a>
-      </p>
+      <div class="fa-dl-row">
+        <a class="btn btn-primary fa-dl-btn" href="${FA_TOOL_ZIP_URL}" download>⬇️ Download FlowAccess Tool</a>
+        <a class="btn btn-primary fa-dl-btn" href="${FA_PRO_ZIP_URL}" download>⬇️ Download FlowAccess Pro</a>
+      </div>
       <p class="ext-instruction" style="font-size:11px;opacity:0.75;">Unzip it, open chrome://extensions, enable Developer mode, then "Load unpacked".</p>
     `;
   }

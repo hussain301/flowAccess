@@ -49,6 +49,26 @@
       white-space: nowrap;
     }
     .btn-sm { padding: 0.4rem 0.8rem; font-size: 0.8rem; }
+    /* Download buttons: stacked, full-width, with breathing room */
+    .fa-dl-row {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6rem;
+      margin: 0.75rem 0;
+    }
+    .fa-dl-btn {
+      display: block;
+      width: 100%;
+      box-sizing: border-box;
+      text-align: center;
+      padding: 0.7rem 1rem;
+      font-size: 0.875rem;
+    }
+    /* Usage History: compact scroll instead of a tall table */
+    .table-container {
+      max-height: 280px;
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
@@ -99,17 +119,6 @@
             ▶ Resume
           </button>
         </div>
-
-        <div class="glass-card dash-card">
-          <h2>My Projects <span id="savedProjectsCount" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 400;">0/3</span></h2>
-          <div id="savedProjectsList">
-            <p style="color: var(--text-muted); font-size: 0.875rem;">Loading...</p>
-          </div>
-          <a id="newProjectBtn" class="btn" href="https://flow.google.com/" target="_blank" rel="noopener" style="width: 100%; padding: 0.75rem; margin-top: 0.75rem; background: #6366f1; color: #fff; font-weight: 700;">
-            ＋ New Project
-          </a>
-          <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.75rem;">💡 Inside Flow, hit <strong>💾 Save Project</strong> — up to 3 projects will appear here.</p>
-        </div>
       </div>
 
       <div class="main-content">
@@ -125,6 +134,17 @@
             </div>
             <p style="color: var(--text-muted);">Remaining time for today</p>
           </div>
+        </div>
+
+        <div class="glass-card dash-card">
+          <h2>My Projects <span id="savedProjectsCount" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 400;">0/3</span></h2>
+          <div id="savedProjectsList">
+            <p style="color: var(--text-muted); font-size: 0.875rem;">Loading...</p>
+          </div>
+          <a id="newProjectBtn" class="btn" href="https://flow.google.com/" target="_blank" rel="noopener" style="width: 100%; padding: 0.75rem; margin-top: 0.75rem; background: #6366f1; color: #fff; font-weight: 700;">
+            ＋ New Project
+          </a>
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.75rem;">💡 Inside Flow, hit <strong>💾 Save Project</strong> — up to 3 projects will appear here.</p>
         </div>
 
         <div class="glass-card dash-card">
