@@ -553,6 +553,45 @@
     }
 
     // ============================
+    // 11. MODEL LABEL HIDE (filhal)
+    // ============================
+    // User request 2026-10-01: hide the "Lower Priority" model label in
+    // Flow's model menu / selector. Text-based: any .label element whose
+    // text includes "Lower Priority" is hidden (display:none). A
+    // MutationObserver keeps it applied as Angular re-renders the menu.
+    function hideLowerPriorityLabels(root) {
+        try {
+            var scope = root || document;
+            if (!scope.querySelectorAll) return;
+            var labels = scope.querySelectorAll('.label');
+            for (var i = 0; i < labels.length; i++) {
+                var el = labels[i];
+                if (el.dataset.faLabelHidden) continue;
+                var t = el.textContent || '';
+                if (t.indexOf('Lower Priority') !== -1) {
+                    el.dataset.faLabelHidden = '1';
+                    el.style.setProperty('display', 'none', 'important');
+                }
+            }
+        } catch (e) {}
+    }
+
+    function watchModelLabel() {
+        hideLowerPriorityLabels(document);
+        try {
+            var obs = new MutationObserver(function (muts) {
+                for (var i = 0; i < muts.length; i++) {
+                    var added = muts[i].addedNodes;
+                    for (var j = 0; j < added.length; j++) {
+                        if (added[j].nodeType === 1) hideLowerPriorityLabels(added[j]);
+                    }
+                }
+            });
+            obs.observe(document.documentElement, { childList: true, subtree: true });
+        } catch (e) {}
+    }
+
+    // ============================
     // INIT
     // ============================
     // Event-driven auto-save: visiting a project page records it in the
@@ -576,6 +615,7 @@
         autoSaveCurrentProject();
         applyFakeIdentity();
         blurOtherProjects();
+        watchModelLabel();
     }
 
     if (document.readyState === 'loading') {
