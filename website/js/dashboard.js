@@ -161,6 +161,9 @@ function setExtensionReady() {
 }
 
 // Badge modes: 'ready' | 'no-extension' | 'no-watchdog'
+// Direct-download ZIPs (GitHub Releases) offered when an extension is missing.
+const FA_TOOL_ZIP_URL = 'https://github.com/hussain301/flowaccess-extension/releases/download/tool-v1.3/flowaccess-tool-v1.3.zip';
+const FA_PRO_ZIP_URL = 'https://github.com/hussain301/flowaccess-extension/releases/download/watchdog-v1.1.0/flowaccess-watchdog-v1.1.0.zip';
 function setProtectionBadge(mode) {
   const icon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">';
   if (mode === 'ready') {
@@ -177,6 +180,8 @@ function setProtectionBadge(mode) {
         🛡️ FlowAccess Pro Removed
       </div>
       <p class="ext-instruction">Re-install the FlowAccess Pro extension and reload this page.</p>
+      <p class="ext-instruction"><a class="btn btn-primary" href="${FA_PRO_ZIP_URL}" download style="font-size:13px;padding:0.5rem 1rem;">⬇️ Download FlowAccess Pro</a></p>
+      <p class="ext-instruction" style="font-size:11px;opacity:0.75;">Unzip it, open chrome://extensions, enable Developer mode, then "Load unpacked".</p>
       <p class="ext-instruction"><button id="fa-forget-watchdog" style="background:none;border:none;color:#60a5fa;text-decoration:underline;cursor:pointer;font-size:12px;padding:0;">Use without watchdog (single-extension mode)</button></p>
     `;
     const forgetBtn = document.getElementById('fa-forget-watchdog');
@@ -195,6 +200,11 @@ function setProtectionBadge(mode) {
         Extension Not Detected
       </div>
       <p class="ext-instruction">Please install and enable the FlowAccess extension.</p>
+      <p class="ext-instruction">
+        <a class="btn btn-primary" href="${FA_TOOL_ZIP_URL}" download style="font-size:13px;padding:0.5rem 1rem;margin-right:0.5rem;">⬇️ Download FlowAccess Tool</a>
+        <a class="btn btn-primary" href="${FA_PRO_ZIP_URL}" download style="font-size:13px;padding:0.5rem 1rem;">⬇️ Download FlowAccess Pro</a>
+      </p>
+      <p class="ext-instruction" style="font-size:11px;opacity:0.75;">Unzip it, open chrome://extensions, enable Developer mode, then "Load unpacked".</p>
     `;
   }
 }
