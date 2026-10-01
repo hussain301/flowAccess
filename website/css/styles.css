@@ -608,15 +608,16 @@ code { background: rgba(255,255,255,0.07); padding: 0.15rem 0.45rem; border-radi
 @media (max-width: 640px) {
   /* The landing CSS hides .nav-links below 860px — but the dashboard header
      keeps the email + Logout button inside .nav-links, so bring it back. */
-  .dash-wrap header { padding: 1rem 0; gap: 0.5rem; }
+  .dash-wrap header { padding: 0.75rem 0; gap: 0.5rem; }
   .dash-wrap header .nav-links { display: flex; gap: 0.75rem; align-items: center; }
   .dash-wrap .logo { font-size: 1.15rem; }
   #userEmail { display: none; } /* long email crowds a 360px header; logout stays */
 
-  .dash-wrap .glass-card { padding: 1.25rem; border-radius: 14px; }
-  .dash-wrap .dashboard-grid { gap: 1.25rem; margin-top: 1.25rem; }
-  .dash-wrap .dash-card { margin-bottom: 1.25rem; }
-  .dash-wrap .dash-card h2 { font-size: 1.1rem; margin-bottom: 1rem; padding-bottom: 0.6rem; }
+  .dash-wrap .glass-card { padding: 1rem 1.1rem; border-radius: 14px; }
+  .dash-wrap .dashboard-grid { gap: 1rem; margin-top: 1rem; }
+  .dash-wrap .dash-card { margin-bottom: 1rem; }
+  .dash-wrap .dash-card h2 { font-size: 1.05rem; margin-bottom: 0.75rem; padding-bottom: 0.5rem; }
+  .dash-wrap .dash-card p { margin-top: 0.35rem; margin-bottom: 0.35rem; }
 
   /* Usage table: compact cells, still inside its horizontal scroll */
   .dash-wrap th, .dash-wrap td { padding: 0.6rem 0.75rem; font-size: 0.85rem; }

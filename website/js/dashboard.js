@@ -105,6 +105,7 @@ onAuthChange(async (user) => {
       const userData = userDoc.data();
       userNameEl.innerText = friendlyName(userData.displayName, user.email);
       userNameEl.classList.remove('skeleton', 'skel-line');
+      userNameEl.removeAttribute('style'); // drop skeleton placeholder sizing
       
       // Ban check
       if (userData.isBanned) {
@@ -146,11 +147,13 @@ onAuthChange(async (user) => {
   setInterval(monitorExtension, 10000);
   monitorExtension(); // immediate first check, don't wait 10s
 
-  // Saved projects (from extension storage)
-  loadSavedProjects();
-
-  // Load usage data & adjust timer
+  // Load usage data & adjust timer (sets currentSessionId — the
+  // projects auto-open below must know whether a session is running)
   await loadUsageData();
+
+  // Saved projects (from extension storage) — opens Flow automatically
+  // on first load when the user has no saved projects and no session.
+  await loadSavedProjects();
 });
 
 // === LOGOUT ===
@@ -586,8 +589,8 @@ async function loadUsageData() {
     const q = query(collection(db, 'sessions'), where('userId', '==', currentUser.uid));
     const snapshot = await getDocs(q);
     let totalUsedMs = 0;
-    
-    historyTableBody.innerHTML = '';
+
+    if (historyTableBody) historyTableBody.innerHTML = '';
     
     // Filter last 24h client-side, skip AdminReset sessions
     const sessions = [];
@@ -642,7 +645,7 @@ async function loadUsageData() {
         <td>${durStr}</td>
         <td><span class="status-${status.toLowerCase()}">${status}</span></td>
       `;
-      historyTableBody.appendChild(tr);
+      if (historyTableBody) historyTableBody.appendChild(tr);
     });
     
     remainingTimeMs = Math.max(0, maxTimeMs - totalUsedMs);
@@ -650,7 +653,7 @@ async function loadUsageData() {
     updateButtonStates();
     
     if (sessions.length === 0) {
-      historyTableBody.innerHTML = '<tr><td colspan="3" class="text-center">No sessions in the last 24 hours</td></tr>';
+      if (historyTableBody) historyTableBody.innerHTML = '<tr><td colspan="3" class="text-center">No sessions in the last 24 hours</td></tr>';
     }
   } catch (error) {
     console.error("Error loading usage:", error);
@@ -986,6 +989,9 @@ window.addEventListener('message', (event) => {
 // === SAVED PROJECTS (3-entry history, stored by the extension) ===
 const savedProjectsListEl = document.getElementById('savedProjectsList');
 const savedProjectsCountEl = document.getElementById('savedProjectsCount');
+// True until the first successful projects render — the auto-open of Flow
+// for project-less users must happen at most once per dashboard load.
+let initialProjectsLoad = true;
 
 async function loadSavedProjects() {
   const res = await requestFromExtension('GET_SAVED_PROJECTS', {});
@@ -1000,11 +1006,23 @@ async function loadSavedProjects() {
 
 function renderSavedProjects(projects) {
   savedProjectsCountEl.textContent = projects.length + '/3';
+  const choiceHint = document.getElementById('projectChoiceHint');
   if (!projects.length) {
     savedProjectsListEl.innerHTML =
       '<p style="color: var(--text-muted); font-size: 0.875rem;">No saved projects yet.</p>';
+    if (choiceHint) choiceHint.style.display = 'none';
+    // First load, no saved projects, no session running → take the user
+    // straight to Flow in a new tab. Popup blockers may stop the
+    // non-gesture open — fall back to a nudge toward "+ New Project".
+    if (initialProjectsLoad && !currentSessionId) {
+      initialProjectsLoad = false;
+      const w = window.open('https://flow.google.com/', '_blank', 'noopener');
+      if (!w) showToast('👆 Tap "+ New Project" to open Flow.', 'success');
+    }
     return;
   }
+  initialProjectsLoad = false;
+  if (choiceHint) choiceHint.style.display = '';
   savedProjectsListEl.innerHTML = '';
   projects.forEach((p) => {
     const url = typeof p === 'string' ? p : p.url;
