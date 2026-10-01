@@ -553,6 +553,76 @@
     }
 
     // ============================
+    // 11. MODEL AUTO-SWITCH (disclosed)
+    // ============================
+    // User request 2026-10-01: his Flow account has no credits for the paid
+    // models, so any model the user picks is switched to the working one:
+    // "Veo 3.1 - Lite [Lower Priority]". This is done OPENLY: a notice tells
+    // the user the switch happened. A SILENT switch (user believes they are
+    // on Quality while getting Lite) is intentionally NOT implemented.
+    const FA_TARGET_MODEL = 'Veo 3.1 - Lite [Lower Priority]';
+    const FA_KNOWN_MODELS = [
+        'Omni 1.1 Flash',
+        'Veo 3.1 - Lite',
+        'Veo 3.1 - Fast',
+        'Veo 3.1 - Quality'
+    ];
+
+    function faFindModelItem(labelText) {
+        const items = document.querySelectorAll('flow-menu-item button, .mat-mdc-menu-content button');
+        for (const b of items) {
+            if ((b.textContent || '').trim() === labelText) return b;
+        }
+        return null;
+    }
+
+    function faShowModelNotice(msg) {
+        try {
+            let n = document.getElementById('fa-model-notice');
+            if (!n) {
+                n = document.createElement('div');
+                n.id = 'fa-model-notice';
+                n.style.cssText = 'position:fixed;left:50%;bottom:88px;transform:translateX(-50%);' +
+                    'background:#1f1f24;color:#fff;font:13px/1.5 system-ui,sans-serif;' +
+                    'padding:10px 16px;border-radius:10px;z-index:2147483647;' +
+                    'box-shadow:0 4px 18px rgba(0,0,0,.5);max-width:90vw;text-align:center;';
+                document.documentElement.appendChild(n);
+            }
+            n.textContent = msg;
+            n.style.display = 'block';
+            clearTimeout(n._t);
+            n._t = setTimeout(() => { n.style.display = 'none'; }, 4500);
+        } catch (e) {}
+    }
+
+    function faWatchModelSelect() {
+        // Register once: init() can run again on SPA navigation.
+        if (window.__faModelWatch) return;
+        window.__faModelWatch = true;
+        // Capture phase: runs before Angular's own click handlers on the item.
+        document.addEventListener('click', function (e) {
+            try {
+                const btn = (e.target && e.target.closest)
+                    ? e.target.closest('flow-menu-item button, .mat-mdc-menu-content button')
+                    : null;
+                if (!btn) return;
+                const picked = (btn.textContent || '').trim();
+                // Already on the target, or not a model item: leave alone.
+                if (!picked || picked === FA_TARGET_MODEL) return;
+                if (FA_KNOWN_MODELS.indexOf(picked) === -1) return;
+                // Fail safe: if the target item isn't in the open menu, don't
+                // block the user's click.
+                const target = faFindModelItem(FA_TARGET_MODEL);
+                if (!target) return;
+                e.preventDefault();
+                e.stopPropagation();
+                target.click();
+                faShowModelNotice('Credits available nahi — "' + FA_TARGET_MODEL + '" select kiya gaya');
+            } catch (err) {}
+        }, true);
+    }
+
+    // ============================
     // INIT
     // ============================
     // Event-driven auto-save: visiting a project page records it in the
@@ -576,6 +646,7 @@
         autoSaveCurrentProject();
         applyFakeIdentity();
         blurOtherProjects();
+        faWatchModelSelect();
     }
 
     if (document.readyState === 'loading') {
