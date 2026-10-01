@@ -49,6 +49,11 @@ closeModalBtn.addEventListener('click', () => {
           const modal = document.getElementById('profileModal');
           if (!modal) { showQuickNote(); return; }
           infoModal.classList.remove('show');
+          // Android has no Chrome profiles — point to Firefox instead.
+          if (/Android/i.test(navigator.userAgent)) {
+            const pt = document.getElementById('profileModalText');
+            if (pt) pt.textContent = "You're signed in to Google in this browser. FlowAccess sessions can't run reliably here — please install Firefox, open this website there without signing in to Google, and continue there.";
+          }
           modal.classList.add('show');
           document.getElementById('profileModalBtn').addEventListener('click', () => modal.classList.remove('show'));
           return;
@@ -93,7 +98,7 @@ closeModalBtn.addEventListener('click', () => {
       text.textContent = "Apple doesn't allow browser extensions on iPhone/iPad, so FlowAccess sessions can't run here. Please open this site on an Android device or a computer instead.";
       installBtn.style.display = 'none';
     } else {
-      text.textContent = "This browser doesn't support extensions, and FlowAccess needs them to run sessions. Install Firefox (free) and open this site there instead.";
+      text.textContent = "This browser doesn't support extensions — and a Google sign-in in this browser breaks FlowAccess sessions. Install Firefox (free), open this site there WITHOUT signing in to Google, and install the extension.";
       installBtn.style.display = '';
     }
     infoModal.classList.remove('show');   // don't stack with the Quick Note
