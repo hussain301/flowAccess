@@ -21,14 +21,54 @@ onAuthChange(user => {
   }
 });
 
-if (!localStorage.getItem('flowAccess_visited')) {
-  infoModal.classList.add('show');
-  localStorage.setItem('flowAccess_visited', 'true');
+// First-visit Quick Note — shown unless the extension's Google-login check pre-empts it.
+function showQuickNote() {
+  if (!localStorage.getItem('flowAccess_visited')) {
+    infoModal.classList.add('show');
+    localStorage.setItem('flowAccess_visited', 'true');
+  }
 }
 
 closeModalBtn.addEventListener('click', () => {
   infoModal.classList.remove('show');
 });
+
+// === Google-login detection via the Tool extension ===
+// If the extension finds the user's own Google login cookies in THIS browser
+// profile, show a strong "use a new Chrome profile" popup on every visit.
+// Clean state (extension present, no Google login) → no popup at all.
+// No extension / check failed → fall back to the first-visit Quick Note.
+(function googleLoginCheck() {
+  try {
+    if (document.documentElement.dataset.flowAccessExtension !== 'true') { showQuickNote(); return; }
+    const id = 'fa-login-check-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+    const decide = (res) => {
+      try {
+        if (!res || res.success !== true) { showQuickNote(); return; }
+        if (res.loggedIn && !res.sessionActive) {
+          const modal = document.getElementById('profileModal');
+          if (!modal) { showQuickNote(); return; }
+          infoModal.classList.remove('show');
+          modal.classList.add('show');
+          document.getElementById('profileModalBtn').addEventListener('click', () => modal.classList.remove('show'));
+          return;
+        }
+        // clean profile or session already running: stay quiet
+      } catch (e) { /* never break the page */ }
+    };
+    const timer = setTimeout(() => decide(null), 2500);
+    const onMsg = (event) => {
+      if (event.source !== window) return;
+      const d = event.data;
+      if (!d || d.source !== 'FLOW_ACCESS_EXTENSION_REPLY' || d.id !== id) return;
+      clearTimeout(timer);
+      window.removeEventListener('message', onMsg);
+      decide(d.response || null);
+    };
+    window.addEventListener('message', onMsg);
+    window.postMessage({ source: 'FLOW_ACCESS_WEB', id, action: 'CHECK_GOOGLE_LOGIN', payload: {} }, '*');
+  } catch (e) { showQuickNote(); }
+})();
 
 // === Mobile browser extension-support check ===
 // On EVERY visit from a mobile browser that cannot run extensions, show a

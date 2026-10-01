@@ -39,7 +39,8 @@ body {
   border-radius: 50%;
   filter: blur(80px);
   opacity: 0.5;
-  animation: float 20s infinite ease-in-out alternate;
+  /* Static on purpose: animating large blurred layers forces a repaint
+     every frame and makes the whole page feel laggy. */
 }
 
 .orb-1 {
@@ -51,13 +52,9 @@ body {
   width: 300px; height: 300px;
   background: #8b5cf6;
   bottom: -10%; right: -10%;
-  animation-delay: -5s;
 }
 
-@keyframes float {
-  0% { transform: translate(0, 0) scale(1); }
-  100% { transform: translate(50px, 50px) scale(1.2); }
-}
+/* (orb float keyframes removed — orbs are static for performance) */
 
 .glass-card {
   background: var(--glass-bg);
@@ -461,15 +458,15 @@ footer {
   position: sticky;
   top: 0;
   z-index: 50;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  background: rgba(10, 10, 15, 0.6);
+  /* No backdrop-filter here: re-blurring on every scroll frame is the
+     main scroll-jank source. A translucent solid bg looks the same. */
+  background: rgba(10, 10, 15, 0.78);
   border-bottom: 1px solid transparent;
   transition: border-color .25s, background .25s;
 }
 .site-nav.scrolled {
   border-bottom-color: var(--glass-border);
-  background: rgba(10, 10, 15, 0.85);
+  background: rgba(10, 10, 15, 0.94);
 }
 .nav-inner {
   display: flex;
@@ -591,6 +588,13 @@ code { background: rgba(255,255,255,0.07); padding: 0.15rem 0.45rem; border-radi
   width: 260px; height: 260px;
   background: #06b6d4;
   top: 40%; left: 60%;
-  animation-delay: -10s;
   opacity: 0.35;
+}
+
+/* Accessibility + perf: honor reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

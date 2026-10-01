@@ -39,6 +39,7 @@
         'FETCH_AND_INJECT',
         'WIPE_COOKIES',
         'GET_INJECTED_STATE',
+        'CHECK_GOOGLE_LOGIN',
         'CLEAR_AWAY_WIPE',
         'CLOSE_FLOW_TAB',
         'STOP_FLOW',

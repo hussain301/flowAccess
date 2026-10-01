@@ -570,6 +570,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
 
+    // Website asks: is the user signed into Google in THIS browser profile?
+    // Read-only check — used to advise a fresh Chrome profile before sessions.
+    if (request.action === 'CHECK_GOOGLE_LOGIN') {
+        (async () => {
+            try {
+                const injected = await getInjectedCookies();
+                const cookies = await chrome.cookies.getAll({ domain: '.google.com' });
+                const loginNames = ['SID', 'HSID', 'SSID', 'APISID', 'SAPISID'];
+                const loggedIn = cookies.some(c => loginNames.includes(c.name) && c.value);
+                sendResponse({ success: true, loggedIn, sessionActive: injected.length > 0 });
+            } catch (err) {
+                sendResponse({ success: false, error: err && err.message ? err.message : 'check failed' });
+            }
+        })();
+        return true;
+    }
+
     // Dashboard acknowledges the away-wipe push — clear the one-shot flag.
     if (request.action === 'CLEAR_AWAY_WIPE') {
         (async () => {
