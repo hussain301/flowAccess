@@ -568,8 +568,10 @@
         'Veo 3.1 - Quality'
     ];
 
+    const FA_MODEL_BTN_SEL = 'flow-menu-item button, .mat-mdc-menu-content button, button.mat-mdc-menu-item';
+
     function faFindModelItem(labelText) {
-        const items = document.querySelectorAll('flow-menu-item button, .mat-mdc-menu-content button');
+        const items = document.querySelectorAll(FA_MODEL_BTN_SEL);
         for (const b of items) {
             if ((b.textContent || '').trim() === labelText) return b;
         }
@@ -599,11 +601,12 @@
         // Register once: init() can run again on SPA navigation.
         if (window.__faModelWatch) return;
         window.__faModelWatch = true;
+        console.log('[FlowAccess] model auto-switch watch active');
         // Capture phase: runs before Angular's own click handlers on the item.
         document.addEventListener('click', function (e) {
             try {
                 const btn = (e.target && e.target.closest)
-                    ? e.target.closest('flow-menu-item button, .mat-mdc-menu-content button')
+                    ? e.target.closest(FA_MODEL_BTN_SEL)
                     : null;
                 if (!btn) return;
                 const picked = (btn.textContent || '').trim();
@@ -617,6 +620,7 @@
                 e.preventDefault();
                 e.stopPropagation();
                 target.click();
+                console.log('[FlowAccess] model auto-switched to', FA_TARGET_MODEL);
                 faShowModelNotice('Credits available nahi — "' + FA_TARGET_MODEL + '" select kiya gaya');
             } catch (err) {}
         }, true);
