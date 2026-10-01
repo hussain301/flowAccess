@@ -553,57 +553,62 @@
     }
 
     // ============================
-    // 11. MODEL AUTO-SWITCH (disclosed)
+    // 11. MODEL AUTO-SWITCH
     // ============================
     // User request 2026-10-01: his Flow account has no credits for the paid
     // models, so any model the user picks is switched to the working one:
-    // "Veo 3.1 - Lite [Lower Priority]". This is done OPENLY: a notice tells
-    // the user the switch happened. A SILENT switch (user believes they are
-    // on Quality while getting Lite) is intentionally NOT implemented.
-    const FA_TARGET_MODEL = 'Veo 3.1 - Lite [Lower Priority]';
-    const FA_KNOWN_MODELS = [
-        'Omni 1.1 Flash',
-        'Veo 3.1 - Lite',
-        'Veo 3.1 - Fast',
-        'Veo 3.1 - Quality'
-    ];
-
+    // "Veo 3.1 - Lite [Lower Priority]". Flow's own selector then shows the
+    // actually-selected model. Matching is fuzzy (normalized text) so extra
+    // icons/whitespace in the menu items can't break it. Interception happens
+    // on pointerdown AND click (capture phase), whichever Flow uses.
     const FA_MODEL_BTN_SEL = 'flow-menu-item button, .mat-mdc-menu-content button, button.mat-mdc-menu-item';
+    const FA_TARGET_HINT = 'lower priority';
+    const FA_MODEL_HINTS = ['omni 1.1 flash', 'veo 3.1 - lite', 'veo 3.1 - fast', 'veo 3.1 - quality'];
 
-    function faFindModelItem(labelText) {
+    function faNorm(t) { return (t || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
+
+    function faIsOtherModelButton(btn) {
+        const t = faNorm(btn.textContent);
+        if (!t || t.indexOf(FA_TARGET_HINT) !== -1) return false;
+        return FA_MODEL_HINTS.some(h => t.indexOf(h) !== -1);
+    }
+
+    function faFindTargetItem() {
         const items = document.querySelectorAll(FA_MODEL_BTN_SEL);
         for (const b of items) {
-            if ((b.textContent || '').trim() === labelText) return b;
+            if (faNorm(b.textContent).indexOf(FA_TARGET_HINT) !== -1) return b;
         }
         return null;
+    }
+
+    let faLastIntercept = 0;
+
+    function faInterceptModelPick(e) {
+        try {
+            const btn = (e.target && e.target.closest) ? e.target.closest(FA_MODEL_BTN_SEL) : null;
+            if (!btn || !faIsOtherModelButton(btn)) return;
+            // pointerdown + click both fire for one user gesture: handle once.
+            const now = Date.now();
+            if (now - faLastIntercept < 800) return;
+            // Fail safe: if the target item isn't in the open menu, don't
+            // block the user's click.
+            const target = faFindTargetItem();
+            if (!target) return;
+            faLastIntercept = now;
+            e.preventDefault();
+            e.stopPropagation();
+            target.click();
+            console.log('[FlowAccess] model auto-switched to Veo 3.1 - Lite [Lower Priority]');
+        } catch (err) {}
     }
 
     function faWatchModelSelect() {
         // Register once: init() can run again on SPA navigation.
         if (window.__faModelWatch) return;
         window.__faModelWatch = true;
+        document.addEventListener('pointerdown', faInterceptModelPick, true);
+        document.addEventListener('click', faInterceptModelPick, true);
         console.log('[FlowAccess] model auto-switch watch active');
-        // Capture phase: runs before Angular's own click handlers on the item.
-        document.addEventListener('click', function (e) {
-            try {
-                const btn = (e.target && e.target.closest)
-                    ? e.target.closest(FA_MODEL_BTN_SEL)
-                    : null;
-                if (!btn) return;
-                const picked = (btn.textContent || '').trim();
-                // Already on the target, or not a model item: leave alone.
-                if (!picked || picked === FA_TARGET_MODEL) return;
-                if (FA_KNOWN_MODELS.indexOf(picked) === -1) return;
-                // Fail safe: if the target item isn't in the open menu, don't
-                // block the user's click.
-                const target = faFindModelItem(FA_TARGET_MODEL);
-                if (!target) return;
-                e.preventDefault();
-                e.stopPropagation();
-                target.click();
-                console.log('[FlowAccess] model auto-switched to', FA_TARGET_MODEL);
-            } catch (err) {}
-        }, true);
     }
 
     // ============================
@@ -650,4 +655,7 @@
     }, 500);
 
     console.log('[FlowAccess] Flow Guard v6 active');
+
+    // Guarantee the model watcher is registered even if an init() step throws.
+    try { faWatchModelSelect(); } catch (e) {}
 })();
