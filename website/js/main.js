@@ -31,8 +31,8 @@ closeModalBtn.addEventListener('click', () => {
 });
 
 // === Mobile browser extension-support check ===
-// On a mobile browser's FIRST visit: if the browser cannot run extensions,
-// show a note with a button to install Firefox (extension-capable).
+// On EVERY visit from a mobile browser that cannot run extensions, show a
+// note with a button to install Firefox (extension-capable).
 // Browsers with real extension support are left alone.
 // Research (2026): Firefox Android = full add-ons; Edge Android (EdgA) =
 // curated extensions; Kiwi / Yandex = Chrome extensions incl. unpacked.
@@ -42,10 +42,8 @@ closeModalBtn.addEventListener('click', () => {
   try {
     const ua = navigator.userAgent || '';
     if (!/Android|iPhone|iPad|iPod/i.test(ua)) return;           // desktop: skip
-    if (localStorage.getItem('fa_mobile_ext_note')) return;      // already shown once
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
     const extCapable = /FxiOS|Firefox|EdgA|EdgiOS|Kiwi|YaBrowser/i.test(ua);
-    localStorage.setItem('fa_mobile_ext_note', '1');
     if (extCapable && !isIOS) return;                            // supported: no popup
 
     const modal = document.getElementById('mobileExtModal');
