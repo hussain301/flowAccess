@@ -519,10 +519,25 @@ async function loadUsers() {
     const dayAgo = Timestamp.fromDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
     const sSnap = await getDocs(query(collection(db, 'sessions'), where('startTime', '>=', dayAgo)));
     userUsageCache = {};
+    const nowMs = Date.now();
     sSnap.forEach(d => {
       const s = d.data();
       if (!s.userId || s.status === 'AdminReset') return;
-      userUsageCache[s.userId] = (userUsageCache[s.userId] || 0) + (s.durationMs || 0);
+      let dur = s.durationMs || 0;
+      if (s.status === 'Active') {
+        // Live accrual — dashboard ka formula: chalte session ka stored
+        // durationMs pause/end tak 0 rehta hai, is liye now - start.
+        // Stale (mara hua browser): last heartbeat + 10 min grace par cap,
+        // taake abandoned session usage ko inflate na kare.
+        const startMs = s.startTime && s.startTime.toMillis ? s.startTime.toMillis()
+          : (s.startedAt && s.startedAt.toMillis ? s.startedAt.toMillis() : 0);
+        const hbMs = s.lastHeartbeat && s.lastHeartbeat.toMillis ? s.lastHeartbeat.toMillis() : 0;
+        if (startMs) {
+          const endMs = (hbMs && nowMs - hbMs > 10 * 60 * 1000) ? hbMs + 10 * 60 * 1000 : nowMs;
+          dur = Math.max(dur, Math.max(0, endMs - startMs));
+        }
+      }
+      userUsageCache[s.userId] = (userUsageCache[s.userId] || 0) + dur;
     });
 
     renderUsersPage();
