@@ -83,9 +83,32 @@ onAuthChange(async (user) => {
   }
   hideVerifyEmailOverlay();
   recordVisit(); // one write per 5h — feeds the admin "Website Visits" stat
-  
+
+  // ---- Fast parallel preload ----
+  // Every independent Firestore read fires in ONE wave instead of four
+  // serial round-trips (each costs a full PK→server round trip).
+  // Extension checks never block rendering: the beacon paints the badge
+  // instantly, the PING liveness monitor runs in the background.
+  checkExtension();
+  setInterval(monitorExtension, 10000);
+  monitorExtension(); // immediate first check, don't wait 10s
+
+  const sessionsQuery = query(collection(db, 'sessions'), where('userId', '==', user.uid));
+  let userDocSnap = null, settingsSnap = null, publicSnap = null, sessionsSnap = null;
   try {
-    let userDoc = await getDoc(doc(db, 'users', user.uid));
+    [userDocSnap, settingsSnap, publicSnap, sessionsSnap] = await Promise.all([
+      getDoc(doc(db, 'users', user.uid)),
+      getDoc(doc(db, 'config', 'settings')),
+      getDoc(doc(db, 'config', 'public')),
+      getDocs(sessionsQuery)
+    ]);
+  } catch (e) {
+    // Individual loaders below fall back to fetching on their own.
+    console.warn('[Dashboard] Parallel preload failed:', e.message);
+  }
+
+  try {
+    let userDoc = userDocSnap || await getDoc(doc(db, 'users', user.uid));
     if (!userDoc.exists()) {
       // Self-heal: the account exists in Firebase Auth but its profile
       // document was never written (e.g. an interrupted registration).
@@ -119,7 +142,7 @@ onAuthChange(async (user) => {
       // Time limit: per-user override > global admin default > 180 min fallback
       let globalLimitMin = 180;
       try {
-        const gsSnap = await getDoc(doc(db, 'config', 'settings'));
+        const gsSnap = settingsSnap || await getDoc(doc(db, 'config', 'settings'));
         if (gsSnap.exists() && gsSnap.data().defaultTimeLimitMinutes) {
           globalLimitMin = parseInt(gsSnap.data().defaultTimeLimitMinutes, 10) || 180;
         }
@@ -139,23 +162,16 @@ onAuthChange(async (user) => {
     console.error("Error loading user profile:", e);
   }
   
-  // Load active endpoint from Firestore
-  await loadActiveEndpoint();
+  // Access config + usage/timer from the preloaded snapshots (usage sets
+  // currentSessionId — the projects auto-open below must know whether a
+  // session is running).
+  await loadActiveEndpoint(publicSnap);
+  await loadUsageData(sessionsSnap);
 
-  // Check extension
-  checkExtension();
-
-  // Watch for mid-session extension/watchdog removal (uninstall/disable)
-  setInterval(monitorExtension, 10000);
-  monitorExtension(); // immediate first check, don't wait 10s
-
-  // Load usage data & adjust timer (sets currentSessionId — the
-  // projects auto-open below must know whether a session is running)
-  await loadUsageData();
-
-  // Saved projects (from extension storage) — opens Flow automatically
-  // on first load when the user has no saved projects and no session.
-  await loadSavedProjects();
+  // Saved projects — NOT awaited: the card renders the moment the
+  // extension replies instead of stalling the dashboard behind the
+  // extension round-trip.
+  loadSavedProjects();
 });
 
 // === LOGOUT ===
@@ -189,7 +205,13 @@ function checkExtension() {
   } else {
     setProtectionBadge('no-extension');
   }
-  document.addEventListener('FLOW_ACCESS_EXTENSION_READY', setExtensionReady);
+  document.addEventListener('FLOW_ACCESS_EXTENSION_READY', () => {
+    const wasConfirmed = mainConfirmedOnce;
+    setExtensionReady();
+    // Content script arrived after the initial beacon check (which showed
+    // the install hint instantly) — load the projects now.
+    if (!wasConfirmed) loadSavedProjects();
+  });
 }
 
 function setExtensionReady() {
@@ -515,9 +537,9 @@ function hideVerifyEmailOverlay() {
 // Reads the published access config from config/public (readable by all
 // signed-in users). Prefers a directly-stored cookie set; falls back to
 // the external endpoint URL. Raw collections stay admin-only.
-async function loadActiveEndpoint() {
+async function loadActiveEndpoint(pubSnap = null) {
   try {
-    const pubDoc = await getDoc(doc(db, 'config', 'public'));
+    const pubDoc = pubSnap || await getDoc(doc(db, 'config', 'public'));
     if (pubDoc.exists()) {
       const data = pubDoc.data();
       if (data.activeEndpointUrl) {
@@ -583,13 +605,13 @@ function normalizeInjectionResult(res, total) {
 }
 
 // === LOAD USAGE DATA ===
-async function loadUsageData() {
+async function loadUsageData(sessionsSnap = null) {
   try {
     const now = new Date();
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     
     const q = query(collection(db, 'sessions'), where('userId', '==', currentUser.uid));
-    const snapshot = await getDocs(q);
+    const snapshot = sessionsSnap || await getDocs(q);
     let totalUsedMs = 0;
 
     if (historyTableBody) historyTableBody.innerHTML = '';
@@ -1008,6 +1030,16 @@ const savedProjectsCountEl = document.getElementById('savedProjectsCount');
 let initialProjectsLoad = true;
 
 async function loadSavedProjects() {
+  // Fast path: no beacon at load and never confirmed → the extension is
+  // absent. Show the install hint instantly instead of burning the full
+  // 8s request timeout. (A late-arriving content script fires
+  // FLOW_ACCESS_EXTENSION_READY, which re-calls this.)
+  if (!mainAlive && !mainConfirmedOnce) {
+    savedProjectsCountEl.textContent = '0/3';
+    savedProjectsListEl.innerHTML =
+      '<p style="color: var(--text-muted); font-size: 0.875rem;">Install the FlowAccess extension to save projects.</p>';
+    return;
+  }
   const res = await requestFromExtension('GET_SAVED_PROJECTS', {});
   if (res && res.success && Array.isArray(res.projects)) {
     renderSavedProjects(res.projects);

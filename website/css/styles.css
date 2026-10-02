@@ -634,3 +634,80 @@ code { background: rgba(255,255,255,0.07); padding: 0.15rem 0.45rem; border-radi
   .toast-container { left: 1rem; right: 1rem; top: 12px; }
   .toast { padding: 0.85rem 1rem; font-size: 0.9rem; }
 }
+
+/* ============ APPLE-STYLE MOTION ============
+   GPU-only (transform + opacity — no layout thrash, safe for phones),
+   springy cubic-beziers, staggered entrances. The
+   prefers-reduced-motion block above still disables all of this. */
+
+/* --- Buttons: buttery hover, springy press --- */
+.btn {
+  transition: transform 0.28s cubic-bezier(0.34, 1.3, 0.64, 1),
+              box-shadow 0.3s ease,
+              background-color 0.2s ease,
+              border-color 0.2s ease,
+              opacity 0.2s ease,
+              filter 0.2s ease;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.96);
+  transition-duration: 0.12s;
+}
+
+/* --- Toast: rises in softly instead of sliding from the side --- */
+.toast {
+  transform: translateY(-14px) scale(0.97);
+  opacity: 0;
+  transition: transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+              opacity 0.3s ease;
+}
+.toast.show {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+/* --- Session timer ring: sweeps continuously like a watch --- */
+#progressCircle {
+  transition: stroke-dashoffset 1s linear;
+}
+.time-text {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Entrances: staggered rise, gentle pop --- */
+@media (prefers-reduced-motion: no-preference) {
+  .dash-card {
+    animation: fa-card-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--reveal-delay, 0ms);
+  }
+  header {
+    animation: fa-fade-down 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .saved-project-row {
+    animation: fa-row-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .saved-project-row:nth-child(2) { animation-delay: 70ms; }
+  .saved-project-row:nth-child(3) { animation-delay: 140ms; }
+  .status-badge {
+    animation: fa-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  .modal-overlay.show .modal-content {
+    animation: fa-pop 0.45s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+  }
+}
+@keyframes fa-card-in {
+  from { opacity: 0; transform: translateY(28px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes fa-fade-down {
+  from { opacity: 0; transform: translateY(-14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fa-row-in {
+  from { opacity: 0; transform: translateX(-14px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes fa-pop {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: scale(1); }
+}
