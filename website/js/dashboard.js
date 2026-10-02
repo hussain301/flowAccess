@@ -28,6 +28,24 @@ function protectionOk() {
 let activeEndpointUrl = null;
 let activeCookies = null; // direct cookie set from Firebase (preferred over endpoint)
 
+// === SERVER-ANCHORED CLOCK ===
+// Device clocks can be changed by the user — so every session duration is
+// measured against Firestore server time, never the client clock.
+// serverOffsetMs is calibrated from the session's own lastHeartbeat
+// (serverTimestamp) read-back, NTP-style, on every heartbeat and at every
+// start/resume. serverNowMs() is the trusted "now".
+let serverOffsetMs = 0;
+function serverNowMs() { return Date.now() + serverOffsetMs; }
+// The currently-running segment, server-anchored: when it started and how
+// much of the daily budget was left at that moment. The heartbeat uses
+// these to end the session exactly when the server says time is up.
+let sessionStartServerMs = 0;
+let remainingAtSegmentStartMs = null;
+function clearSegmentClock() {
+  sessionStartServerMs = 0;
+  remainingAtSegmentStartMs = null;
+}
+
 // === DOM ELEMENTS ===
 const userEmailEl = document.getElementById('userEmail');
 const userNameEl = document.getElementById('userName');
@@ -389,11 +407,12 @@ async function autoPauseSession(reason) {
     isPaused = true;
     if (timerInterval) clearInterval(timerInterval);
     stopHeartbeat();
+    clearSegmentClock();
     const sessionRef = doc(db, 'sessions', currentSessionId);
     const sessionDoc = await getDoc(sessionRef);
     let durationMs = 0;
     if (sessionDoc.exists() && sessionDoc.data().startedAt) {
-      durationMs = Math.max(0, Date.now() - sessionDoc.data().startedAt.toDate().getTime());
+      durationMs = Math.max(0, serverNowMs() - sessionDoc.data().startedAt.toDate().getTime());
     }
     await updateDoc(sessionRef, {
       status: 'Paused',
@@ -607,7 +626,8 @@ function normalizeInjectionResult(res, total) {
 // === LOAD USAGE DATA ===
 async function loadUsageData(sessionsSnap = null) {
   try {
-    const now = new Date();
+    // Server-anchored "now" — device-clock tampering can't shrink usage.
+    const now = new Date(serverNowMs());
     const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     
     const q = query(collection(db, 'sessions'), where('userId', '==', currentUser.uid));
@@ -646,6 +666,8 @@ async function loadUsageData(sessionsSnap = null) {
           durationMs = now.getTime() - started.getTime();
           currentSessionId = id;
           isPaused = false;
+          // Server-anchored segment for the heartbeat expiry backstop.
+          sessionStartServerMs = started.getTime();
           startTimer();
           startHeartbeat();
         }
@@ -673,6 +695,11 @@ async function loadUsageData(sessionsSnap = null) {
     });
     
     remainingTimeMs = Math.max(0, maxTimeMs - totalUsedMs);
+    // The restored segment's budget was just computed — arm the
+    // server-anchored expiry backstop with it.
+    if (currentSessionId && !isPaused && sessionStartServerMs) {
+      remainingAtSegmentStartMs = remainingTimeMs;
+    }
     updateTimerUI();
     updateButtonStates();
     
@@ -701,13 +728,45 @@ function startHeartbeat() {
   heartbeatInterval = setInterval(async () => {
     if (!currentSessionId || isPaused) return;
     try {
-      await updateDoc(doc(db, 'sessions', currentSessionId), {
-        lastHeartbeat: serverTimestamp()
-      });
+      await calibrateServerClock();
+      // Server-anchored expiry backstop: even if the 1s client timer was
+      // slowed or the device clock tampered with, the server clock ends
+      // the session on time and the server row is updated.
+      if (sessionStartServerMs && remainingAtSegmentStartMs != null &&
+          serverNowMs() - sessionStartServerMs >= remainingAtSegmentStartMs) {
+        await expireTimeUp();
+        return;
+      }
     } catch(e) {
       console.warn('[Dashboard] Heartbeat failed:', e.message);
     }
   }, HEARTBEAT_INTERVAL_MS);
+}
+
+// The 1s client timer and the heartbeat backstop share one expiry path:
+// end the session on the server, wipe cookies, close Flow tabs.
+async function expireTimeUp() {
+  await endSession('Expired');
+  sendToExtension('WIPE_COOKIES', {});
+  sendToExtension('CLOSE_FLOW_TAB', {});
+  showToast("⏰ Time limit reached! Flow session ended.", "error");
+  updateButtonStates();
+  setTimeout(() => loadUsageData(), 1000);
+}
+
+// NTP-style calibration: write a server timestamp, read it back, and set
+// offset = serverTime - clientTime using the round-trip midpoint.
+async function calibrateServerClock() {
+  if (!currentSessionId) return;
+  const ref = doc(db, 'sessions', currentSessionId);
+  const t0 = Date.now();
+  await updateDoc(ref, { lastHeartbeat: serverTimestamp() });
+  const snap = await getDoc(ref);
+  const t1 = Date.now();
+  const hb = snap.data() && snap.data().lastHeartbeat;
+  if (hb && hb.toMillis) {
+    serverOffsetMs = hb.toMillis() - (t0 + t1) / 2;
+  }
 }
 
 function stopHeartbeat() {
@@ -780,7 +839,7 @@ function alreadyActiveError() {
 async function claimSessionSlot(buildSessionData, resumingId = null) {
   const userRef = doc(db, 'users', currentUser.uid);
   return await runTransaction(db, async (tx) => {
-    const now = new Date();
+    const now = new Date(serverNowMs());
     const userSnap = await tx.get(userRef);
     const activeId = userSnap.exists() ? (userSnap.data().activeSessionId || null) : null;
     if (activeId && activeId !== resumingId) {
@@ -832,7 +891,7 @@ async function isSlotTakenByOther() {
     const activeId = u.exists() ? (u.data().activeSessionId || null) : null;
     if (!activeId || activeId === currentSessionId) return false;
     const s = await getDoc(doc(db, 'sessions', activeId));
-    return s.exists() && isSlotOccupied(s.data(), new Date());
+    return s.exists() && isSlotOccupied(s.data(), new Date(serverNowMs()));
   } catch(e) {
     console.warn('[Dashboard] Slot pre-check failed:', e.message);
     return false;
@@ -945,20 +1004,8 @@ function startTimer() {
     
     if (remainingTimeMs <= 0) {
       clearInterval(timerInterval);
-      
-      // Time expired — end session, wipe cookies, close Flow
-      await endSession('Expired');
-      
-      // Wipe cookies (logout from Flow)
-      sendToExtension('WIPE_COOKIES', {});
-      
-      // Close Flow tab
-      sendToExtension('CLOSE_FLOW_TAB', {});
-      
-      showToast("⏰ Time limit reached! Flow session ended.", "error");
-      updateButtonStates();
-      
-      setTimeout(() => loadUsageData(), 1000);
+      // Time expired — shared server-anchored expiry path
+      await expireTimeUp();
     }
   }, 1000);
 }
@@ -1280,7 +1327,18 @@ startFlowBtn.addEventListener('click', async () => {
     currentSessionId = sessionId;
     isPaused = false;
 
-    // 3. Start countdown timer + heartbeat (Flow tab was opened/reloaded
+    // 3. Arm the server-anchored clock: calibrate against the server NOW
+    //    (the resume/start moment itself is server-timed) and record the
+    //    segment budget for the heartbeat expiry backstop.
+    try {
+      await calibrateServerClock();
+      sessionStartServerMs = serverNowMs();
+    } catch (e) {
+      sessionStartServerMs = Date.now();
+    }
+    remainingAtSegmentStartMs = remainingTimeMs;
+
+    // 4. Start countdown timer + heartbeat (Flow tab was opened/reloaded
     //    by the extension after the cookies were injected)
     showToast(`✅ Session started! ${inj.injected} cookies injected.`, "success");
     startTimer();
@@ -1316,8 +1374,8 @@ async function pauseSession() {
     if (sessionDoc.exists()) {
       const data = sessionDoc.data();
       const started = data.startedAt.toDate();
-      const now = new Date();
-      const durationMs = now.getTime() - started.getTime();
+      // Server-anchored: the pause moment is measured on the server clock.
+      const durationMs = serverNowMs() - started.getTime();
       
       await updateDoc(sessionRef, {
         status: 'Paused',
@@ -1325,6 +1383,7 @@ async function pauseSession() {
         pausedAt: serverTimestamp()
       });
     }
+    clearSegmentClock();
     
     // Wipe cookies — logout from Flow
     sendToExtension('WIPE_COOKIES', {});
@@ -1425,7 +1484,16 @@ resumeFlowBtn.addEventListener('click', async () => {
 
     currentSessionId = newSessionId;
     isPaused = false;
-    
+
+    // Server-anchored segment: calibrate at the resume moment, arm budget.
+    try {
+      await calibrateServerClock();
+      sessionStartServerMs = serverNowMs();
+    } catch (e) {
+      sessionStartServerMs = Date.now();
+    }
+    remainingAtSegmentStartMs = remainingTimeMs;
+
     // 3. Restart timer + heartbeat
     startTimer();
     startHeartbeat();
@@ -1453,8 +1521,8 @@ async function endSession(status = 'Completed') {
     if (sessionDoc.exists()) {
       const data = sessionDoc.data();
       const started = data.startedAt.toDate();
-      const now = new Date();
-      const durationMs = now.getTime() - started.getTime();
+      // Server-anchored: the end moment is measured on the server clock.
+      const durationMs = serverNowMs() - started.getTime();
       
       await updateDoc(sessionRef, {
         endedAt: serverTimestamp(),
@@ -1468,6 +1536,7 @@ async function endSession(status = 'Completed') {
     await releaseSessionSlot(currentSessionId);
     
     currentSessionId = null;
+    clearSegmentClock();
     if (timerInterval) clearInterval(timerInterval);
     stopHeartbeat();
     updateButtonStates();
@@ -1540,6 +1609,7 @@ async function endAllSessions() {
 
     currentSessionId = null;
     isPaused = false;
+    clearSegmentClock();
     if (timerInterval) clearInterval(timerInterval);
     stopHeartbeat();
     showToast("🛑 Session ended. You can start fresh now.", "success");
