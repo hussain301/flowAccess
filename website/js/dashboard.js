@@ -46,6 +46,17 @@ function clearSegmentClock() {
   remainingAtSegmentStartMs = null;
 }
 
+// Cached Firebase ID token for the tab-close keepalive write. pagehide
+// handlers can't await a fresh token, so one is kept warm (refreshed at
+// auth, every 45 min, and on every start/resume).
+let cachedIdToken = null;
+let tokenRefreshStarted = false;
+async function refreshIdToken() {
+  try {
+    if (currentUser) cachedIdToken = await currentUser.getIdToken();
+  } catch (e) { /* keep the previous token */ }
+}
+
 // === DOM ELEMENTS ===
 const userEmailEl = document.getElementById('userEmail');
 const userNameEl = document.getElementById('userName');
@@ -101,6 +112,11 @@ onAuthChange(async (user) => {
   }
   hideVerifyEmailOverlay();
   recordVisit(); // one write per 5h — feeds the admin "Website Visits" stat
+  refreshIdToken();
+  if (!tokenRefreshStarted) {
+    tokenRefreshStarted = true;
+    setInterval(refreshIdToken, 45 * 60 * 1000);
+  }
 
   // ---- Fast parallel preload ----
   // Every independent Firestore read fires in ONE wave instead of four
@@ -1343,6 +1359,7 @@ startFlowBtn.addEventListener('click', async () => {
     showToast(`✅ Session started! ${inj.injected} cookies injected.`, "success");
     startTimer();
     startHeartbeat();
+    refreshIdToken(); // warm token for the tab-close keepalive write
     updateButtonStates();
     
   } catch (error) {
@@ -1497,6 +1514,7 @@ resumeFlowBtn.addEventListener('click', async () => {
     // 3. Restart timer + heartbeat
     startTimer();
     startHeartbeat();
+    refreshIdToken(); // warm token for the tab-close keepalive write
     updateButtonStates();
     
     showToast("▶ Session resumed!", "success");
@@ -1622,3 +1640,55 @@ async function endAllSessions() {
   }
 }
 endFlowBtn.addEventListener('click', endAllSessions);
+
+// === TAB CLOSE: end the active session automatically ===
+// On Android, closing the tab runs no async cleanup — the session would
+// dangle as Active until the 10-min heartbeat-stale backstop. So pagehide
+// (which DOES fire reliably on mobile tab close) does two best-effort
+// writes without awaiting: (1) the normal SDK update, and (2) a keepalive
+// REST PATCH, which the browser delivers even after the page dies.
+// Paused sessions are deliberately left alone — pause means "I'll be back".
+const FA_PROJECT_ID = 'flow-access-1f022';
+window.addEventListener('pagehide', () => {
+  if (!currentSessionId || isPaused || !currentUser) return;
+  const sid = currentSessionId;
+  const hasStart = sessionStartServerMs > 0;
+  const durMs = hasStart ? Math.max(0, Math.round(serverNowMs() - sessionStartServerMs)) : 0;
+
+  // (1) Best-effort SDK write (usually wins on desktop).
+  try {
+    const patch = {
+      status: 'Expired',
+      endedAt: serverTimestamp(),
+      endTime: serverTimestamp(),
+      expiredReason: 'tab-closed'
+    };
+    if (hasStart) patch.durationMs = durMs;
+    updateDoc(doc(db, 'sessions', sid), patch).catch(() => {});
+    releaseSessionSlot(sid);
+  } catch (e) {}
+
+  // (2) Keepalive REST write — survives tab death on Android.
+  try {
+    if (cachedIdToken) {
+      const endedAt = new Date(serverNowMs()).toISOString();
+      const fields = {
+        status: { stringValue: 'Expired' },
+        endedAt: { timestampValue: endedAt },
+        endTime: { timestampValue: endedAt },
+        expiredReason: { stringValue: 'tab-closed' }
+      };
+      if (hasStart) fields.durationMs = { integerValue: String(durMs) };
+      const mask = Object.keys(fields).map(f => 'updateMask.fieldPaths=' + f).join('&');
+      fetch(
+        `https://firestore.googleapis.com/v1/projects/${FA_PROJECT_ID}/databases/(default)/documents/sessions/${sid}?${mask}`,
+        {
+          method: 'PATCH',
+          headers: { 'Authorization': 'Bearer ' + cachedIdToken, 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ fields }),
+          keepalive: true
+        }
+      ).catch(() => {});
+    }
+  } catch (e) {}
+});
