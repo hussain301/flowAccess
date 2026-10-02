@@ -171,28 +171,40 @@
             pointer-events: none !important;
         }
 
-        /* --- Save Button --- */
+        /* --- Save Button: compact icon FAB (mobile-friendly) --- */
         #fa-save-btn {
             position: fixed !important;
             bottom: 20px !important;
             right: 20px !important;
+            width: 46px !important;
+            height: 46px !important;
+            padding: 0 !important;
+            border-radius: 50% !important;
             background: #1a73e8 !important;
             color: #fff !important;
             border: none !important;
-            padding: 10px 20px !important;
-            border-radius: 24px !important;
-            font-family: 'Google Sans', sans-serif !important;
-            font-size: 14px !important;
-            font-weight: 500 !important;
+            font-size: 22px !important;
+            line-height: 1 !important;
             cursor: pointer !important;
             z-index: 999999 !important;
             box-shadow: 0 4px 12px rgba(26,115,232,0.4) !important;
             display: flex !important;
             align-items: center !important;
-            gap: 8px !important;
+            justify-content: center !important;
+            animation: fa-save-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
         }
-        #fa-save-btn:hover { background: #1557b0 !important; transform: translateY(-2px) !important; }
+        @media (max-width: 640px) {
+            /* Flow's bottom input bar sits at the very bottom on phones —
+               park the button just above it so it never covers site UI. */
+            #fa-save-btn { bottom: 92px !important; right: 14px !important; }
+        }
+        #fa-save-btn:hover { background: #1557b0 !important; transform: scale(1.06) !important; }
+        #fa-save-btn:active { transform: scale(0.92) !important; }
         #fa-save-btn.saved { background: #0d9488 !important; }
+        @keyframes fa-save-pop {
+            from { opacity: 0; transform: scale(0.6); }
+            to { opacity: 1; transform: scale(1); }
+        }
 
         /* --- Fake per-user avatar (replaces real Google profile photo) --- */
         .fa-fake-avatar {
@@ -427,14 +439,17 @@
 
         const paint = () => {
             if (isProjectSaved(cleanUrl)) {
-                btn.textContent = '✅ Project Saved';
+                btn.textContent = '✅';
                 btn.classList.add('saved');
+                btn.title = 'Project saved — click to copy the link again';
             } else {
-                btn.textContent = '💾 Save Project';
+                btn.textContent = '💾';
                 btn.classList.remove('saved');
+                btn.title = 'Save this project';
             }
         };
         paint();
+        btn.setAttribute('aria-label', 'Save project');
 
         btn.onclick = async () => {
             const name = currentProjectName(cleanUrl);
@@ -447,12 +462,14 @@
                 const copied = window.FaShared
                     ? await FaShared.copyTextWithFallback(formats.link)
                     : false;
-                btn.textContent = copied ? '✅ Saved & Copied!' : '✅ Saved';
+                btn.textContent = '✅';
                 btn.classList.add('saved');
+                btn.title = copied ? 'Saved — link copied!' : 'Project saved';
                 setTimeout(paint, 2000);
             } else {
                 const limited = res && res.error === 'PROJECT_LIMIT_REACHED';
-                btn.textContent = limited ? '⚠️ Max 3 projects' : '⚠️ Save failed';
+                btn.textContent = '⚠️';
+                btn.title = limited ? 'Max 3 projects — remove one from the dashboard' : 'Save failed — try again';
                 setTimeout(paint, 2000);
             }
         };
