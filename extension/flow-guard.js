@@ -23,6 +23,7 @@
     let projectHistory = [];  // 3 entries {url, name, savedAt} — background is source of truth
     let fakeEmail = null;     // per-user random gmail (replaces real account email)
     let fakeEmoji = null;     // per-user random avatar emoji
+    let fakeName = null;      // per-user random display name (replaces real account name)
     let lastGenerateClick = 0;
 
     // Talk to the background service worker (project history store, panel)
@@ -71,15 +72,17 @@
 
     if (typeof chrome !== 'undefined' && chrome.storage) {
         chrome.storage.local.get(
-            ['fakeBalance', 'faFakeEmail', 'faFakeEmoji'],
+            ['fakeBalance', 'faFakeEmail', 'faFakeEmoji', 'faFakeName'],
             r => {
                 if (typeof r.fakeBalance === 'number') fakeBalance = r.fakeBalance;
                 if (typeof r.faFakeEmail === 'string' && r.faFakeEmail.includes('@')) fakeEmail = r.faFakeEmail;
                 if (typeof r.faFakeEmoji === 'string' && r.faFakeEmoji) fakeEmoji = r.faFakeEmoji;
-                if (!fakeEmail || !fakeEmoji) {
+                if (typeof r.faFakeName === 'string' && r.faFakeName.trim()) fakeName = r.faFakeName;
+                if (!fakeEmail || !fakeEmoji || !fakeName) {
                     if (!fakeEmail) fakeEmail = makeRandomEmail();
                     if (!fakeEmoji) fakeEmoji = FAKE_EMOJIS[Math.floor(Math.random() * FAKE_EMOJIS.length)];
-                    chrome.storage.local.set({ faFakeEmail: fakeEmail, faFakeEmoji: fakeEmoji });
+                    if (!fakeName) fakeName = makeRandomName();
+                    chrome.storage.local.set({ faFakeEmail: fakeEmail, faFakeEmoji: fakeEmoji, faFakeName: fakeName });
                 }
                 try { scheduleIdentitySweep(); } catch (e) {}
             }
@@ -97,6 +100,15 @@
         let s = '';
         for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
         return 'user' + s + '@gmail.com';
+    }
+
+    // Per-user fake display name — must look like a real Google account
+    // name, generated once per browser and reused afterwards.
+    const FAKE_FIRST = ['Aariz','Zayan','Ibrahim','Mira','Sara','Kian','Rayan','Hira','Danish','Alina','Fahad','Mahnoor','Usman','Ayesha','Bilal','Sana','Hamza','Iqra','Adil','Noor'];
+    const FAKE_LAST = ['Khan','Ali','Shah','Malik','Raza','Ahmed','Butt','Sheikh','Farooq','Iqbal'];
+    function makeRandomName() {
+        return FAKE_FIRST[Math.floor(Math.random() * FAKE_FIRST.length)] + ' ' +
+               FAKE_LAST[Math.floor(Math.random() * FAKE_LAST.length)];
     }
 
     function persistBalance() {
@@ -348,12 +360,13 @@
     // ============================
     // 3b. FAKE PER-USER IDENTITY
     // ============================
-    // Replaces the shared account's real photo with the user's random emoji
-    // and the real gmail address with the user's random gmail (per browser).
+    // Replaces the shared account's real photo with the user's random emoji,
+    // the real gmail address with the user's random gmail, and the real
+    // display name with the user's random name (per browser).
     const EMAIL_RE = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
 
     function applyFakeIdentity() {
-        if (!fakeEmail || !fakeEmoji) return;
+        if (!fakeEmail || !fakeEmoji || !fakeName) return;
 
         // 1. Avatar photo -> emoji
         document.querySelectorAll('img').forEach(img => {
@@ -382,6 +395,43 @@
                 el.textContent = fakeEmail;
             }
         });
+
+        // 3. Real display name -> per-user random name. The name sits next
+        //    to the email in the account menu — locate it via each faked
+        //    email element (nearest leaf-text sibling, name before email).
+        document.querySelectorAll('[data-fa-email-done]').forEach(emailEl => {
+            if (emailEl.dataset.faNameLinked) return;
+            emailEl.dataset.faNameLinked = '1';
+            const nameEl = findAccountNameNear(emailEl);
+            if (nameEl && !nameEl.dataset.faNameDone) {
+                nameEl.dataset.faNameDone = '1';
+                nameEl.textContent = fakeName;
+            }
+        });
+    }
+
+    // Nearest leaf-text sibling of the email element, preferring the one
+    // before it (Google puts the name above the email). Skips controls
+    // like "Switch account" / "Sign out".
+    function findAccountNameNear(emailEl) {
+        let node = emailEl;
+        for (let depth = 0; depth < 3 && node && node.parentElement; depth++) {
+            const parent = node.parentElement;
+            const kids = Array.from(parent.children);
+            const idx = kids.indexOf(node);
+            const ordered = [...kids.slice(0, idx).reverse(), ...kids.slice(idx + 1)];
+            for (const sib of ordered) {
+                if (sib.dataset && (sib.dataset.faNameDone || sib.dataset.faEmailDone)) continue;
+                const t = (sib.textContent || '').trim();
+                if (!t || EMAIL_RE.test(t)) continue;
+                if (/^(switch account|manage your google account|sign out|add another account)$/i.test(t)) continue;
+                let leaf = sib;
+                while (leaf.children.length === 1) leaf = leaf.firstElementChild;
+                if (leaf.children.length === 0 && (leaf.textContent || '').trim()) return leaf;
+            }
+            node = parent;
+        }
+        return null;
     }
 
     // Instant identity enforcement: the account menu popup is inserted
