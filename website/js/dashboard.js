@@ -1171,8 +1171,13 @@ function renderSavedProjects(projects) {
   });
 }
 
-// NOTE: #newProjectBtn is a plain <a target="_blank"> link in dashboard.html,
-// so it opens Flow with zero JavaScript (immune to cache/JS/popup issues).
+// #newProjectBtn follows the same rule as saved projects: active session
+// → open Flow directly; paused → resume (inject) first; no session →
+// start (inject) first, then open Flow in the prepared tab.
+const newProjectBtn = document.getElementById('newProjectBtn');
+if (newProjectBtn) {
+  newProjectBtn.addEventListener('click', () => openProjectWithSession('https://flow.google.com/'));
+}
 
 // Project open rule:
 //  - Active session  -> open the project URL directly (cookies are live).

@@ -109,19 +109,6 @@
         </div>
 
         <div class="glass-card dash-card" style="--reveal-delay: 180ms;">
-          <h2>My Projects <span id="savedProjectsCount" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 400;">0/3</span></h2>
-          <p id="projectChoiceHint" style="display: none; color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.75rem;">Continue a previous project, or start a new one below.</p>
-          <div id="savedProjectsList">
-            <div class="skeleton skel-block" style="height:2.6rem;margin-bottom:0.5rem;">&nbsp;</div>
-            <div class="skeleton skel-block" style="height:2.6rem;">&nbsp;</div>
-          </div>
-          <a id="newProjectBtn" class="btn" href="https://flow.google.com/" target="_blank" rel="noopener" style="width: 100%; padding: 0.75rem; margin-top: 0.75rem; background: #6366f1; color: #fff; font-weight: 700;">
-            ＋ New Project
-          </a>
-          <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.75rem;">💡 Inside Flow, hit <strong>💾 Save Project</strong> — up to 3 projects will appear here.</p>
-        </div>
-
-        <div class="glass-card dash-card" style="--reveal-delay: 270ms;">
           <h2>Controls</h2>
           <button id="startFlowBtn" class="btn btn-primary" style="width: 100%; padding: 1rem;" disabled>
             ▶ Access Flow
@@ -135,6 +122,19 @@
           <button id="endFlowBtn" class="btn" style="width: 100%; padding: 1rem; margin-top: 0.5rem; background: transparent; border: 1px solid #ef4444; color: #ef4444; display: none; font-weight: 700;">
             🛑 End Session
           </button>
+        </div>
+
+        <div class="glass-card dash-card" style="--reveal-delay: 270ms;">
+          <h2>My Projects <span id="savedProjectsCount" style="font-size: 0.8rem; color: var(--text-muted); font-weight: 400;">0/3</span></h2>
+          <p id="projectChoiceHint" style="display: none; color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.75rem;">Continue a previous project, or start a new one below.</p>
+          <div id="savedProjectsList">
+            <div class="skeleton skel-block" style="height:2.6rem;margin-bottom:0.5rem;">&nbsp;</div>
+            <div class="skeleton skel-block" style="height:2.6rem;">&nbsp;</div>
+          </div>
+          <button id="newProjectBtn" type="button" class="btn" style="width: 100%; padding: 0.75rem; margin-top: 0.75rem; background: #6366f1; color: #fff; font-weight: 700; border: none; cursor: pointer;">
+            ＋ New Project
+          </button>
+          <p style="color: var(--text-muted); font-size: 0.8rem; margin-top: 0.75rem;">💡 Inside Flow, hit <strong>💾 Save Project</strong> — up to 3 projects will appear here.</p>
         </div>
       </div>
 
