@@ -202,7 +202,7 @@ registerForm.addEventListener('submit', async (e) => {
   registering = true;
   try {
     await registerUser(name, email, password);
-    showToast('Account created! Verification email sent — check your inbox.', 'success');
+    showToast('Account created! Verification email sent — check your inbox (and spam folder).', 'success');
     // registerUser() fully finished (Firestore profile saved) — safe to go.
     window.location.href = 'dashboard.html';
   } catch (error) {
