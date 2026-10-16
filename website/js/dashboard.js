@@ -93,11 +93,23 @@ onAuthChange(async (user) => {
     await user.getIdToken(true);
   } catch (e) {
     const code = e && e.code ? String(e.code) : '';
-    if (code === 'auth/user-token-expired' || code === 'auth/user-disabled' ||
-        code === 'auth/invalid-user-token' || code === 'auth/user-not-found') {
-      try { await logoutUser(); } catch (_) {}
-      window.location.href = 'index.html';
-      return;
+    const fatal = code === 'auth/user-token-expired' || code === 'auth/user-disabled' ||
+        code === 'auth/invalid-user-token' || code === 'auth/user-not-found';
+    if (fatal) {
+      // Retry once before destroying the session — a single transient
+      // token-service hiccup must never wipe a good saved login.
+      await new Promise(r => setTimeout(r, 1500));
+      try {
+        await user.getIdToken(true);
+      } catch (e2) {
+        const code2 = e2 && e2.code ? String(e2.code) : '';
+        if (code2 === 'auth/user-token-expired' || code2 === 'auth/user-disabled' ||
+            code2 === 'auth/invalid-user-token' || code2 === 'auth/user-not-found') {
+          try { await logoutUser(); } catch (_) {}
+          window.location.href = 'index.html';
+          return;
+        }
+      }
     }
     // Transient error (e.g. offline) — let Firebase retry on its own.
   }
