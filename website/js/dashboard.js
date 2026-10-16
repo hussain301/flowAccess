@@ -524,7 +524,7 @@ function showVerifyEmailOverlay(email) {
     <div style="background:#1f2937;color:#f9fafb;border:1px solid #374151;border-radius:16px;padding:32px 36px;max-width:440px;margin:16px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:inherit;">
       <div style="font-size:44px;margin-bottom:12px;">📧</div>
       <h2 style="margin:0 0 10px;font-size:20px;">Verify your email</h2>
-      <p style="margin:0 0 8px;color:#d1d5db;font-size:14px;line-height:1.6;">We sent a verification link to<br><b>${escHtml(email)}</b>.<br>Click it, then come back here.</p>
+      <p style="margin:0 0 8px;color:#d1d5db;font-size:14px;line-height:1.6;">We sent a verification link to<br><b>${escHtml(email)}</b>.<br>Click it, then come back here.<br><span style="color:#9ca3af;font-size:13px;">Can't find it? Check your spam / junk folder too.</span></p>
       <p style="margin:0 0 20px;color:#9ca3af;font-size:13px;line-height:1.6;">Sessions stay locked until your Gmail is verified.</p>
       <button id="fa-verify-resend" style="background:#3b82f6;color:#fff;border:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;margin-right:8px;">↻ Resend email</button>
       <button id="fa-verify-done" style="background:#10b981;color:#fff;border:none;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;cursor:pointer;">✓ I've verified</button>
