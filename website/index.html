@@ -11,7 +11,7 @@
   <meta name="author" content="FlowAccess">
   <meta name="robots" content="index, follow">
   <link rel="canonical" href="https://flowaccess-phi.vercel.app/">
-  <meta name="theme-color" content="#0b0b14">
+  <meta name="theme-color" content="#060607">
 
   <!-- Open Graph -->
   <meta property="og:type" content="website">
@@ -46,7 +46,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./css/styles.css">
 </head>
-<body>
+<body class="landing">
   <div class="bg-animation">
     <div class="orb orb-1"></div>
     <div class="orb orb-2"></div>
@@ -88,30 +88,99 @@
         Flow<span>Access</span>
       </a>
       <nav class="nav-links">
+        <a href="#showcase">Showcase</a>
         <a href="#features">Features</a>
-        <a href="#how">How it works</a>
+        <a href="#free">Free</a>
         <a href="#extensions">Extensions</a>
         <a href="#faq">FAQ</a>
       </nav>
-      <a href="#auth" class="btn btn-primary btn-sm">Login</a>
+      <a href="#auth" class="vu-btn-white btn-sm">Login</a>
     </div>
   </header>
 
   <main id="top">
     <!-- HERO -->
-    <section class="hero hero-lg">
-      <div class="container">
-        <div class="hero-badge">✨ Free access to Google Flow AI</div>
-        <h1>Create stunning AI videos with <span class="grad">Google Flow</span></h1>
-        <p class="hero-sub">FlowAccess unlocks Google Flow AI — including <strong>Veo 3.1</strong> video generation — right in your browser. Free daily sessions, a smart timer, and isolated profiles that keep your own Google account untouched.</p>
-        <div class="hero-cta">
-          <a href="#auth" class="btn btn-primary btn-lg">Get Started Free</a>
+    <section class="vu-hero">
+      <!-- Showcase clip hotlinked from veounlimited.com (their demo library, direct mp4) -->
+      <video class="vu-hero-video" src="https://veounlimited.com/showcase/image/07.mp4" autoplay muted loop playsinline preload="auto"></video>
+      <div class="vu-hero-overlay"></div>
+      <div class="container vu-hero-content">
+        <div class="vu-pill">✨ 100% free · Veo 3.1 · No watermark</div>
+        <h1>Type a prompt.<br><span class="vu-grad">FlowAccess</span> brings it to life.</h1>
+        <p class="vu-hero-sub">Free access to Google Flow AI — cinematic text-to-video with Veo 3.1, a smart daily session timer, and isolated profiles that keep your own Google account untouched.</p>
+        <div class="vu-promptbar">
+          <img src="./favicon.svg" alt="" width="22" height="22">
+          <span>A neon city in the rain, cinematic drone shot…</span>
+          <a href="#auth" class="vu-btn-white btn-sm">Create</a>
+        </div>
+        <div class="vu-chips">
+          <span class="vu-chip">Veo 3.1</span>
+          <span class="vu-chip">8s clips</span>
+          <span class="vu-chip">16:9 · 9:16</span>
+        </div>
+        <div class="hero-cta" style="margin-top:2rem;">
+          <a href="#auth" class="vu-btn-white btn-lg">Get Started Free</a>
           <a href="#extensions" class="btn btn-ghost btn-lg">⬇️ Get the Extension</a>
         </div>
-        <div class="hero-stats">
-          <div class="hstat"><strong>100%</strong><span>Free forever</span></div>
-          <div class="hstat"><strong>Veo 3.1</strong><span>AI video model</span></div>
-          <div class="hstat"><strong>Daily</strong><span>Smart session timer</span></div>
+      </div>
+      <a href="#showcase" class="vu-scrolldown" aria-label="Scroll down">⌄</a>
+    </section>
+
+    <!-- STATS -->
+    <section class="vu-stats">
+      <div class="container vu-stats-inner">
+        <div class="vu-stat"><strong>100%</strong><span>Free forever</span></div>
+        <div class="vu-stat"><strong>Veo 3.1</strong><span>AI video model</span></div>
+        <div class="vu-stat"><strong>Daily</strong><span>Smart session timer</span></div>
+        <div class="vu-stat"><strong>3</strong><span>Saved projects</span></div>
+      </div>
+    </section>
+
+    <!-- SHOWCASE -->
+    <section id="showcase" class="section">
+      <div class="container">
+        <div class="section-head">
+          <div class="vu-pill">SHOWCASE</div>
+          <h2>See what <span class="vu-grad">Flow</span> can create</h2>
+          <p>Real clips from the Veo demo library — this is the quality waiting inside your free sessions.</p>
+        </div>
+        <div class="vu-grid">
+          <figure class="vu-card vu-card-wide">
+            <video src="https://veounlimited.com/showcase/text/21.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">▶ Text to video · 8s</span>
+            <figcaption><span class="vu-meta">TEXT · 16:9</span><strong>From a single line</strong><p>Describe the shot — Flow renders the cinema.</p></figcaption>
+          </figure>
+          <figure class="vu-card">
+            <video src="https://veounlimited.com/showcase/image/02.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">▶ Image to video · 8s</span>
+            <figcaption><span class="vu-meta">IMAGE · 9:16</span><strong>Still to motion</strong><p>Bring any image alive in seconds.</p></figcaption>
+          </figure>
+          <figure class="vu-card">
+            <video src="https://veounlimited.com/showcase/character/03.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">▶ Character · 8s</span>
+            <figcaption><span class="vu-meta">CHARACTER · 16:9</span><strong>Consistent cast</strong><p>Same character, every scene.</p></figcaption>
+          </figure>
+          <figure class="vu-card">
+            <video src="https://veounlimited.com/showcase/frame/02.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">▶ Frame to video · 8s</span>
+            <figcaption><span class="vu-meta">FRAME · 9:16</span><strong>Frames in motion</strong><p>Start and end frames, filled in.</p></figcaption>
+          </figure>
+          <figure class="vu-card">
+            <video src="https://veounlimited.com/showcase/extend/10.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">▶ Extend · 8s</span>
+            <figcaption><span class="vu-meta">EXTEND · 9:16</span><strong>Keep it rolling</strong><p>Stretch any clip further.</p></figcaption>
+          </figure>
+          <figure class="vu-card">
+            <video src="https://veounlimited.com/showcase/long/03.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">▶ Long video · 8s</span>
+            <figcaption><span class="vu-meta">LONG · 9:16</span><strong>Bigger stories</strong><p>Chain clips into narratives.</p></figcaption>
+          </figure>
         </div>
       </div>
     </section>
@@ -120,67 +189,127 @@
     <section id="features" class="section">
       <div class="container">
         <div class="section-head">
-          <h2>Everything you need to create with <span class="grad">Flow AI</span></h2>
-          <p>One lightweight setup — browser extension plus dashboard — and you're generating.</p>
+          <div class="vu-pill">FEATURES</div>
+          <h2>Everything you need to <span class="vu-grad">create</span></h2>
+          <p>One lightweight setup — extension plus dashboard — and you're generating.</p>
         </div>
-        <div class="grid-3">
-          <div class="glass-card feature-card">
-            <div class="f-ico">🎬</div>
-            <h3>Google Flow Access</h3>
-            <p>Full access to Google's Flow AI filmmaking tool — prompts, scenes and takes, without paying for access.</p>
+
+        <div class="vu-split">
+          <div class="vu-split-media">
+            <video src="https://veounlimited.com/showcase/text/11.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <span class="vu-tag">▶ Text to video · 16:9 · 8s</span>
           </div>
-          <div class="glass-card feature-card">
-            <div class="f-ico">🤖</div>
-            <h3>Veo 3.1 Generation</h3>
-            <p>Generate cinematic AI video with Veo 3.1 — Google's latest text-to-video model, ready out of the box.</p>
+          <div class="vu-split-text">
+            <div class="vu-pill">CREATE</div>
+            <h3>Text to video, instantly</h3>
+            <p>Full access to Google's Flow AI filmmaking tool — prompts, scenes and takes with Veo 3.1, right in your browser.</p>
+            <ul class="vu-checks">
+              <li>Veo 3.1 cinematic generation</li>
+              <li>Text, image &amp; frame to video</li>
+              <li>Character-consistent scenes</li>
+              <li>One-click session start</li>
+            </ul>
+            <a href="#auth" class="vu-btn-white">Start creating free</a>
           </div>
-          <div class="glass-card feature-card">
-            <div class="f-ico">⏱️</div>
-            <h3>Smart Session Timer</h3>
-            <p>Your daily usage is tracked automatically with pause and resume — never lose track of remaining time.</p>
+        </div>
+
+        <div class="vu-split vu-split-rev">
+          <div class="vu-split-media">
+            <video src="https://veounlimited.com/showcase/frame/01.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <span class="vu-tag">⏱ Daily sessions · auto-pause</span>
           </div>
-          <div class="glass-card feature-card">
-            <div class="f-ico">🛡️</div>
-            <h3>Isolated Profiles</h3>
-            <p>Runs in a separate Chrome profile so your personal Google account and data stay completely untouched.</p>
+          <div class="vu-split-text">
+            <div class="vu-pill">SESSIONS</div>
+            <h3>A timer that respects your time</h3>
+            <p>Your daily allowance is tracked automatically — pause for a break, resume later, and never lose a minute.</p>
+            <ul class="vu-checks">
+              <li>Free daily session allowance</li>
+              <li>Pause &amp; resume anytime</li>
+              <li>Live countdown on your dashboard</li>
+              <li>Auto-expiry when time runs out</li>
+            </ul>
+            <a href="#auth" class="vu-btn-white">Claim your session</a>
           </div>
-          <div class="glass-card feature-card">
-            <div class="f-ico">💾</div>
-            <h3>Save Projects</h3>
-            <p>Keep your best Flow projects saved to your dashboard and jump back into them anytime.</p>
+        </div>
+
+        <div class="vu-split">
+          <div class="vu-split-media">
+            <video src="https://veounlimited.com/showcase/extend/02.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <span class="vu-tag">🛡 Isolated profile</span>
           </div>
-          <div class="glass-card feature-card">
-            <div class="f-ico">⚡</div>
-            <h3>One-Click Sessions</h3>
-            <p>Start, pause and resume sessions in a single click — the extension handles the technical setup for you.</p>
+          <div class="vu-split-text">
+            <div class="vu-pill">PRIVATE</div>
+            <h3>Your Google account stays yours</h3>
+            <p>Sessions run in a separate Chrome profile with a masked account identity — your personal Google data is never touched.</p>
+            <ul class="vu-checks">
+              <li>Dedicated Chrome profile</li>
+              <li>Masked account name &amp; avatar</li>
+              <li>One-click cookie injection</li>
+              <li>Save up to 3 projects</li>
+            </ul>
+            <a href="#extensions" class="vu-btn-white">Get the extension</a>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- HOW IT WORKS -->
-    <section id="how" class="section">
+    <!-- FOUR WAYS -->
+    <section class="section">
       <div class="container">
         <div class="section-head">
-          <h2>Up and running in <span class="grad">3 steps</span></h2>
-          <p>No complicated setup. Five minutes from now you can be generating video.</p>
+          <h2>Four ways to <span class="vu-grad">start a clip</span></h2>
+          <p>Pick a mode, write a prompt, watch it render.</p>
         </div>
-        <div class="grid-3">
-          <div class="glass-card step-card">
-            <div class="step-n">1</div>
-            <h3>Install the extension</h3>
-            <p>Download the FlowAccess Tool and Pro extensions below and load them into a fresh Chrome profile.</p>
-          </div>
-          <div class="glass-card step-card">
-            <div class="step-n">2</div>
-            <h3>Create your account</h3>
-            <p>Register with your email, verify it with one click, and open your personal dashboard.</p>
-          </div>
-          <div class="glass-card step-card">
-            <div class="step-n">3</div>
-            <h3>Start creating</h3>
-            <p>Hit "Access Flow", get your daily session, and start generating AI video with Veo 3.1.</p>
-          </div>
+        <div class="vu-grid vu-grid-4">
+          <figure class="vu-card">
+            <video src="https://veounlimited.com/showcase/text/54.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">Text to video · 9:16 · 8s</span>
+            <figcaption><strong>Text to video</strong></figcaption>
+          </figure>
+          <figure class="vu-card">
+            <video src="https://veounlimited.com/showcase/character/26.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">Character · 16:9 · 8s</span>
+            <figcaption><strong>Character stories</strong></figcaption>
+          </figure>
+          <figure class="vu-card">
+            <video src="https://veounlimited.com/showcase/long/04.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">Long video · 9:16 · 8s</span>
+            <figcaption><strong>Longer cuts</strong></figcaption>
+          </figure>
+          <figure class="vu-card">
+            <video src="https://veounlimited.com/showcase/text/21.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <div class="vu-scrim"></div>
+            <span class="vu-tag">Text to video · 8s</span>
+            <figcaption><strong>Fresh every day</strong></figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- FREE (instead of pricing) -->
+    <section id="free" class="section">
+      <div class="container">
+        <div class="section-head">
+          <div class="vu-pill">FREE FOREVER</div>
+          <h2>One plan. <span class="vu-grad">Zero cost.</span></h2>
+          <p>No subscriptions, no credit card, no hidden fees — just create.</p>
+        </div>
+        <div class="vu-free-card">
+          <div class="vu-free-price"><strong>$0</strong><span>forever</span></div>
+          <h3>FlowAccess Free</h3>
+          <ul class="vu-checks">
+            <li>Veo 3.1 video generation</li>
+            <li>Free daily sessions</li>
+            <li>Smart timer with pause &amp; resume</li>
+            <li>3 saved projects</li>
+            <li>Isolated Chrome profile</li>
+            <li>Masked account identity</li>
+          </ul>
+          <a href="#auth" class="vu-btn-white btn-lg" style="width:100%;">Create free account</a>
+          <p class="vu-fineprint">Free during the pilot and beyond. No credit card required — ever.</p>
         </div>
       </div>
     </section>
@@ -189,21 +318,22 @@
     <section id="extensions" class="section">
       <div class="container">
         <div class="section-head">
-          <h2>Get the <span class="grad">extensions</span></h2>
+          <div class="vu-pill">SETUP</div>
+          <h2>Get the <span class="vu-grad">extensions</span></h2>
           <p>Two lightweight Chrome extensions power your FlowAccess sessions. Install both in a new Chrome profile.</p>
         </div>
         <div class="grid-2">
           <div class="glass-card ext-card">
             <div class="f-ico">🧰</div>
             <h3>FlowAccess Tool</h3>
-            <p class="muted">v1.4 — session access, cookie handling and Flow integration.</p>
-            <a class="btn btn-primary" href="https://github.com/hussain301/flowaccess-extension/releases/download/tool-v1.4/flowaccess-tool-v1.4.zip" download>⬇️ Download Tool</a>
+            <p class="muted">v1.4.5 — session access, cookie handling and Flow integration.</p>
+            <a class="vu-btn-white" href="https://github.com/hussain301/flowaccess-extension/releases/download/tool-v1.4.5/flowaccess-tool-v1.4.5.zip" download>⬇️ Download Tool</a>
           </div>
           <div class="glass-card ext-card">
             <div class="f-ico">🛡️</div>
             <h3>FlowAccess Pro</h3>
-            <p class="muted">v1.1.0 — companion protection that keeps every session secure.</p>
-            <a class="btn btn-primary" href="https://github.com/hussain301/flowaccess-extension/releases/download/watchdog-v1.1.0/flowaccess-watchdog-v1.1.0.zip" download>⬇️ Download Pro</a>
+            <p class="muted">v1.1.1 — companion protection that keeps every session secure.</p>
+            <a class="vu-btn-white" href="https://github.com/hussain301/flowaccess-extension/releases/download/watchdog-v1.1.1/flowaccess-watchdog-v1.1.1.zip" download>⬇️ Download Pro</a>
           </div>
         </div>
         <p class="muted center" style="margin-top:1rem">After downloading, unzip and load each folder via <code>chrome://extensions</code> → Developer mode → Load unpacked.</p>
@@ -214,7 +344,8 @@
     <section id="auth" class="section">
       <div class="container">
         <div class="section-head">
-          <h2>Join <span class="grad">FlowAccess</span></h2>
+          <div class="vu-pill">GET STARTED</div>
+          <h2>Join <span class="vu-grad">FlowAccess</span></h2>
           <p>Create a free account or log back into your dashboard.</p>
         </div>
         <div class="auth-section glass-card">
@@ -265,7 +396,8 @@
     <section id="faq" class="section">
       <div class="container">
         <div class="section-head">
-          <h2>Frequently asked <span class="grad">questions</span></h2>
+          <div class="vu-pill">FAQ</div>
+          <h2>Questions, <span class="vu-grad">answered</span></h2>
         </div>
         <div class="faq-list">
           <details class="glass-card faq-item">
@@ -296,28 +428,59 @@
     <section class="section">
       <div class="container">
         <div class="glass-card cta-card">
-          <h2>Ready to create with <span class="grad">Google Flow AI</span>?</h2>
+          <h2>Your next creation <span class="vu-grad">starts here</span></h2>
           <p>Join free today — your first session is a click away.</p>
-          <a href="#auth" class="btn btn-primary btn-lg">Get Started Free</a>
+          <div class="hero-cta">
+            <a href="#auth" class="vu-btn-white btn-lg">Get Started Free</a>
+            <a href="#extensions" class="btn btn-ghost btn-lg">⬇️ Get the Extension</a>
+          </div>
         </div>
       </div>
     </section>
   </main>
 
-  <footer class="site-footer">
-    <div class="container footer-inner">
-      <a href="#top" class="logo">
-        <img src="./favicon.svg" alt="FlowAccess logo" width="22" height="22">
-        Flow<span>Access</span>
-      </a>
+  <footer class="vu-footer">
+    <div class="container vu-footer-grid">
+      <div>
+        <a href="#top" class="logo">
+          <img src="./favicon.svg" alt="FlowAccess logo" width="22" height="22">
+          Flow<span>Access</span>
+        </a>
+        <p class="muted" style="margin-top:0.75rem;font-size:0.9rem;max-width:260px;">Free Google Flow AI access with Veo 3.1 video generation.</p>
+        <a class="btn btn-ghost btn-sm" style="margin-top:1rem;" href="https://github.com/hussain301/flowAccess" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <div>
+        <h4>Explore</h4>
+        <a href="#showcase">Showcase</a>
+        <a href="#features">Features</a>
+        <a href="#free">Free plan</a>
+        <a href="#faq">FAQ</a>
+      </div>
+      <div>
+        <h4>Get started</h4>
+        <a href="#auth">Login</a>
+        <a href="#auth">Register</a>
+        <a href="#extensions">Download Tool</a>
+        <a href="#extensions">Download Pro</a>
+      </div>
+    </div>
+    <div class="container vu-footer-bottom">
       <p class="muted">&copy; 2026 FlowAccess. All rights reserved.</p>
+      <p class="vu-status"><span class="vu-dot"></span> All systems normal</p>
     </div>
   </footer>
 
+  <button id="toTop" class="vu-totop" aria-label="Back to top">↑</button>
+
   <script>
-    // Sticky nav shadow + FAQ accordion (single-open)
+    // Sticky nav shadow + FAQ accordion (single-open) + back-to-top
     const nav = document.querySelector('.site-nav');
-    addEventListener('scroll', () => nav.classList.toggle('scrolled', scrollY > 10), { passive: true });
+    const toTop = document.getElementById('toTop');
+    addEventListener('scroll', () => {
+      nav.classList.toggle('scrolled', scrollY > 10);
+      toTop.classList.toggle('show', scrollY > 600);
+    }, { passive: true });
+    toTop.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }));
     document.querySelectorAll('.faq-item').forEach(d => {
       d.addEventListener('toggle', () => {
         if (d.open) document.querySelectorAll('.faq-item').forEach(o => { if (o !== d) o.open = false; });
