@@ -818,7 +818,11 @@ body.landing .nav-links a { white-space: nowrap; }
   z-index: 1;
   background: radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,0.55) 100%), linear-gradient(180deg, rgba(6,6,7,0.84) 0%, rgba(6,6,7,0.58) 45%, rgba(6,6,7,0.94) 100%);
 }
-.vu-hero-content { position: relative; z-index: 2; }
+.vu-hero-content { position: relative; z-index: 2; min-width: 0; }
+/* min-width:0 — .vu-hero is flex; without this the content can't shrink
+   below the prompt bar's nowrap max-content and text gets clipped both sides */
+.vu-promptbar > img, .vu-promptbar > a { flex-shrink: 0; }
+.vu-promptbar > span { flex-shrink: 1; min-width: 0; }
 .vu-hero h1 {
   font-size: clamp(2.4rem, 6vw, 4.5rem);
   font-weight: 900;
@@ -1187,8 +1191,21 @@ body.landing .vu-totop { bottom: 5.75rem; }
   box-shadow: 0 0 18px rgba(0, 230, 118, 0.45);
 }
 @media (max-width: 900px) {
-  .vu-hero-rail { right: 0.7rem; gap: 0.55rem; }
-  .vu-rail-thumb { width: 46px; height: 70px; border-radius: 10px; }
+  .vu-hero { flex-direction: column; }
+  .vu-hero-content { order: 1; width: 100%; }
+  .vu-hero-rail {
+    position: static;
+    order: 2;
+    transform: none;
+    flex-direction: row;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin: 1.5rem 0 0;
+    padding: 0 1rem;
+    animation: none;
+  }
+  .vu-rail-thumb { width: 54px; height: 74px; border-radius: 10px; }
+  .vu-scrolldown { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .vu-hero-rail { animation: none; }
