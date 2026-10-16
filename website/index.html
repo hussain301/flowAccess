@@ -124,6 +124,23 @@
         </div>
       </div>
       <a href="#showcase" class="vu-scrolldown" aria-label="Scroll down">⌄</a>
+      <div class="vu-hero-rail" role="tablist" aria-label="Featured scenes">
+        <button class="vu-rail-thumb active" data-video="./videos/image-07.mp4" aria-label="Shark underwater">
+          <img src="./images/image-07.jpg" alt="" loading="lazy">
+        </button>
+        <button class="vu-rail-thumb" data-video="./videos/text-21.mp4" aria-label="Astronaut on the moon">
+          <img src="./images/text-21.jpg" alt="" loading="lazy">
+        </button>
+        <button class="vu-rail-thumb" data-video="./videos/image-02.mp4" aria-label="Lion at sunset">
+          <img src="./images/image-02.jpg" alt="" loading="lazy">
+        </button>
+        <button class="vu-rail-thumb" data-video="./videos/text-54.mp4" aria-label="Temple explorers">
+          <img src="./images/text-54.jpg" alt="" loading="lazy">
+        </button>
+        <button class="vu-rail-thumb" data-video="./videos/character-26.mp4" aria-label="Glowing cave">
+          <img src="./images/character-26.jpg" alt="" loading="lazy">
+        </button>
+      </div>
     </section>
 
     <!-- STATS -->
@@ -280,10 +297,10 @@
             <figcaption><strong>Longer cuts</strong></figcaption>
           </figure>
           <figure class="vu-card">
-            <video src="./videos/text-21.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video src="./videos/text-22.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
-            <span class="vu-tag">Text to video · 8s</span>
-            <figcaption><strong>Fresh every day</strong></figcaption>
+            <span class="vu-tag">Text to video · 9:16 · 8s</span>
+            <figcaption><strong>Bull run</strong></figcaption>
           </figure>
         </div>
       </div>
@@ -598,8 +615,7 @@
       });
     });
 
-    // Scroll-reveal animations (staggered)
-    const io = new IntersectionObserver((entries) => {
+    // Scroll-reveal animations (staggered)    const io = new IntersectionObserver((entries) => {
       entries.forEach(e => {
         if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
       });
@@ -612,6 +628,37 @@
       if (i > 0) el.style.transitionDelay = Math.min(i, 8) * 70 + 'ms';
       io.observe(el);
     });
+
+    // Hero video rail — switch scenes, auto-rotate every 9s
+    const heroVideo = document.querySelector('.vu-hero-video');
+    const railBtns = Array.from(document.querySelectorAll('.vu-rail-thumb'));
+    let heroIdx = 0, heroTimer = null;
+    let currentSrc = heroVideo ? heroVideo.getAttribute('src') : null;
+    function setHeroScene(i, user) {
+      if (!heroVideo || !railBtns.length) return;
+      heroIdx = (i + railBtns.length) % railBtns.length;
+      const btn = railBtns[heroIdx];
+      railBtns.forEach(b => b.classList.toggle('active', b === btn));
+      const src = btn.dataset.video;
+      if (src === currentSrc) return;
+      currentSrc = src;
+      heroVideo.style.opacity = '0';
+      setTimeout(() => {
+        heroVideo.src = src;
+        heroVideo.play().catch(() => {});
+      }, 340);
+      if (user) restartHeroTimer();
+    }
+    if (heroVideo) {
+      heroVideo.addEventListener('canplay', () => { heroVideo.style.opacity = '1'; });
+    }
+    function restartHeroTimer() {
+      if (heroTimer) clearInterval(heroTimer);
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      heroTimer = setInterval(() => setHeroScene(heroIdx + 1), 9000);
+    }
+    railBtns.forEach((b, i) => b.addEventListener('click', () => setHeroScene(i, true)));
+    restartHeroTimer();
   </script>
   <script type="module" src="./js/main.js"></script>
 </body>
