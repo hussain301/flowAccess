@@ -45,6 +45,15 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="./css/styles.css">
+  <script>
+    // Adaptive video quality: serve SD versions on slow connections (2g/3g or Data Saver)
+    window.__FA_SD = (function () {
+      try {
+        var c = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+        return !!(c && (c.saveData || /^(2g|3g)$/.test(c.effectiveType || '')));
+      } catch (e) { return false; }
+    })();
+  </script>
 </head>
 <body class="landing">
   <div class="bg-animation">
@@ -102,7 +111,7 @@
     <!-- HERO -->
     <section class="vu-hero">
       <!-- Demo clips (Veo showcase library), served locally from ./videos/ -->
-      <video class="vu-hero-video" src="./videos/image-07.mp4" autoplay muted loop playsinline preload="auto"></video>
+      <video class="vu-hero-video" data-hd="./videos/image-07.mp4" data-sd="./videos/sd/image-07.mp4" autoplay muted loop playsinline preload="auto"></video>
       <div class="vu-hero-overlay"></div>
       <div class="container vu-hero-content">
         <div class="vu-pill">✨ 100% free · Veo 3.1 · No watermark</div>
@@ -125,19 +134,19 @@
       </div>
       <a href="#showcase" class="vu-scrolldown" aria-label="Scroll down">⌄</a>
       <div class="vu-hero-rail" role="tablist" aria-label="Featured scenes">
-        <button class="vu-rail-thumb active" data-video="./videos/image-07.mp4" aria-label="Shark underwater">
+        <button class="vu-rail-thumb active" data-hd="./videos/image-07.mp4" data-sd="./videos/sd/image-07.mp4" aria-label="Shark underwater">
           <img src="./images/image-07.jpg" alt="" loading="lazy">
         </button>
-        <button class="vu-rail-thumb" data-video="./videos/text-21.mp4" aria-label="Astronaut on the moon">
+        <button class="vu-rail-thumb" data-hd="./videos/text-21.mp4" data-sd="./videos/sd/text-21.mp4" aria-label="Astronaut on the moon">
           <img src="./images/text-21.jpg" alt="" loading="lazy">
         </button>
-        <button class="vu-rail-thumb" data-video="./videos/image-02.mp4" aria-label="Lion at sunset">
+        <button class="vu-rail-thumb" data-hd="./videos/image-02.mp4" data-sd="./videos/sd/image-02.mp4" aria-label="Lion at sunset">
           <img src="./images/image-02.jpg" alt="" loading="lazy">
         </button>
-        <button class="vu-rail-thumb" data-video="./videos/text-54.mp4" aria-label="Temple explorers">
+        <button class="vu-rail-thumb" data-hd="./videos/text-54.mp4" data-sd="./videos/sd/text-54.mp4" aria-label="Temple explorers">
           <img src="./images/text-54.jpg" alt="" loading="lazy">
         </button>
-        <button class="vu-rail-thumb" data-video="./videos/character-26.mp4" aria-label="Glowing cave">
+        <button class="vu-rail-thumb" data-hd="./videos/character-26.mp4" data-sd="./videos/sd/character-26.mp4" aria-label="Glowing cave">
           <img src="./images/character-26.jpg" alt="" loading="lazy">
         </button>
       </div>
@@ -163,37 +172,37 @@
         </div>
         <div class="vu-grid">
           <figure class="vu-card vu-card-wide">
-            <video src="./videos/text-21.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/text-21.mp4" data-sd="./videos/sd/text-21.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">▶ Text to video · 8s</span>
             <figcaption><span class="vu-meta">TEXT · 16:9</span><strong>From a single line</strong><p>Describe the shot — Flow renders the cinema.</p></figcaption>
           </figure>
           <figure class="vu-card">
-            <video src="./videos/image-02.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/image-02.mp4" data-sd="./videos/sd/image-02.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">▶ Image to video · 8s</span>
             <figcaption><span class="vu-meta">IMAGE · 9:16</span><strong>Still to motion</strong><p>Bring any image alive in seconds.</p></figcaption>
           </figure>
           <figure class="vu-card">
-            <video src="./videos/character-03.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/character-03.mp4" data-sd="./videos/sd/character-03.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">▶ Character · 8s</span>
             <figcaption><span class="vu-meta">CHARACTER · 16:9</span><strong>Consistent cast</strong><p>Same character, every scene.</p></figcaption>
           </figure>
           <figure class="vu-card">
-            <video src="./videos/frame-02.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/frame-02.mp4" data-sd="./videos/sd/frame-02.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">▶ Frame to video · 8s</span>
             <figcaption><span class="vu-meta">FRAME · 9:16</span><strong>Frames in motion</strong><p>Start and end frames, filled in.</p></figcaption>
           </figure>
           <figure class="vu-card">
-            <video src="./videos/extend-10.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/extend-10.mp4" data-sd="./videos/sd/extend-10.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">▶ Extend · 8s</span>
             <figcaption><span class="vu-meta">EXTEND · 9:16</span><strong>Keep it rolling</strong><p>Stretch any clip further.</p></figcaption>
           </figure>
           <figure class="vu-card">
-            <video src="./videos/long-03.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/long-03.mp4" data-sd="./videos/sd/long-03.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">▶ Long video · 8s</span>
             <figcaption><span class="vu-meta">LONG · 9:16</span><strong>Bigger stories</strong><p>Chain clips into narratives.</p></figcaption>
@@ -213,7 +222,7 @@
 
         <div class="vu-split">
           <div class="vu-split-media">
-            <video src="./videos/text-11.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/text-11.mp4" data-sd="./videos/sd/text-11.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <span class="vu-tag">▶ Text to video · 16:9 · 8s</span>
           </div>
           <div class="vu-split-text">
@@ -232,7 +241,7 @@
 
         <div class="vu-split vu-split-rev">
           <div class="vu-split-media">
-            <video src="./videos/frame-01.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/frame-01.mp4" data-sd="./videos/sd/frame-01.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <span class="vu-tag">⏱ Daily sessions · auto-pause</span>
           </div>
           <div class="vu-split-text">
@@ -251,7 +260,7 @@
 
         <div class="vu-split">
           <div class="vu-split-media">
-            <video src="./videos/extend-02.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/extend-02.mp4" data-sd="./videos/sd/extend-02.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <span class="vu-tag">🛡 Isolated profile</span>
           </div>
           <div class="vu-split-text">
@@ -279,25 +288,25 @@
         </div>
         <div class="vu-grid vu-grid-4">
           <figure class="vu-card">
-            <video src="./videos/text-54.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/text-54.mp4" data-sd="./videos/sd/text-54.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">Text to video · 9:16 · 8s</span>
             <figcaption><strong>Text to video</strong></figcaption>
           </figure>
           <figure class="vu-card">
-            <video src="./videos/character-26.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/character-26.mp4" data-sd="./videos/sd/character-26.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">Character · 16:9 · 8s</span>
             <figcaption><strong>Character stories</strong></figcaption>
           </figure>
           <figure class="vu-card">
-            <video src="./videos/long-04.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/long-04.mp4" data-sd="./videos/sd/long-04.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">Long video · 9:16 · 8s</span>
             <figcaption><strong>Longer cuts</strong></figcaption>
           </figure>
           <figure class="vu-card">
-            <video src="./videos/text-22.mp4" muted loop playsinline preload="metadata" autoplay></video>
+            <video data-hd="./videos/text-22.mp4" data-sd="./videos/sd/text-22.mp4" muted loop playsinline preload="metadata" autoplay></video>
             <div class="vu-scrim"></div>
             <span class="vu-tag">Text to video · 9:16 · 8s</span>
             <figcaption><strong>Bull run</strong></figcaption>
@@ -601,6 +610,11 @@
   </a>
 
   <script>
+    // Adaptive video quality — set HD/SD source on every video before anything loads
+    document.querySelectorAll('video[data-hd]').forEach(function (v) {
+      v.src = window.__FA_SD ? v.dataset.sd : v.dataset.hd;
+    });
+
     // Dynamic accent palette — a different theme on every visit
     (function vuPalette() {
       const palettes = [
@@ -653,13 +667,16 @@
     const heroVideo = document.querySelector('.vu-hero-video');
     const railBtns = Array.from(document.querySelectorAll('.vu-rail-thumb'));
     let heroIdx = 0, heroTimer = null;
-    let currentSrc = heroVideo ? heroVideo.getAttribute('src') : null;
+    function heroSrcFor(b) {
+      return new URL(window.__FA_SD ? b.dataset.sd : b.dataset.hd, document.baseURI).href;
+    }
+    let currentSrc = heroVideo ? heroVideo.src : null;
     function setHeroScene(i, user) {
       if (!heroVideo || !railBtns.length) return;
       heroIdx = (i + railBtns.length) % railBtns.length;
       const btn = railBtns[heroIdx];
       railBtns.forEach(b => b.classList.toggle('active', b === btn));
-      const src = btn.dataset.video;
+      const src = heroSrcFor(btn);
       if (src === currentSrc) return;
       currentSrc = src;
       heroVideo.style.opacity = '0';
