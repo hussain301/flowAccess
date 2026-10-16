@@ -634,7 +634,8 @@
       });
     });
 
-    // Scroll-reveal animations (staggered)    const io = new IntersectionObserver((entries) => {
+    // Scroll-reveal animations (staggered)
+    const io = new IntersectionObserver((entries) => {
       entries.forEach(e => {
         if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
       });
