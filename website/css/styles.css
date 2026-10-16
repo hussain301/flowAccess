@@ -1,7 +1,12 @@
 :root {
   --bg-color: #0a0a0f;
-  --accent: #6366f1;
-  --accent-hover: #4f46e5;
+  --pa: #00e676;
+  --pa-hover: #00c968;
+  --pa-light: #7dffce;
+  --pa-rgb: 0,230,118;
+  --pa-grad: linear-gradient(135deg, #00e676, #00e5a0 60%, #7dffce);
+  --accent: var(--pa);
+  --accent-hover: var(--pa-hover);
   --text-main: #f3f4f6;
   --text-muted: #9ca3af;
   --glass-bg: rgba(255, 255, 255, 0.03);
@@ -715,11 +720,6 @@ code { background: rgba(255,255,255,0.07); padding: 0.15rem 0.45rem; border-radi
 /* ============ LANDING V2 — veounlimited-style (scoped: landing only) ============ */
 body.landing {
   --bg-color: #060607;
-  --pa: #00e676;
-  --pa-hover: #00c968;
-  --pa-light: #7dffce;
-  --pa-rgb: 0,230,118;
-  --pa-grad: linear-gradient(135deg, #00e676, #00e5a0 60%, #7dffce);
   --accent: var(--pa);
   --accent-hover: var(--pa-hover);
   --text-muted: #9aa0a6;
