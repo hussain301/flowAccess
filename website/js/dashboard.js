@@ -428,6 +428,14 @@ async function handleAwayWipe() {
   await autoPauseSession('away-wipe');
 }
 
+// New-tab page hit: end the session outright (the user walked away).
+async function handleNewTabEnd() {
+  try { await requestFromExtension('CLEAR_NEW_TAB_END', {}); } catch (e) {}
+  if (!currentSessionId) return;
+  showToast('Session ended — you opened a new tab.', 'success');
+  await endSession('Completed');
+}
+
 // Shared server-side auto-pause (used for both removal cases).
 async function autoPauseSession(reason) {
   if (!currentSessionId || isPaused) return;
@@ -1079,6 +1087,12 @@ window.addEventListener('message', (event) => {
   // listener): the user left Flow, injected cookies were wiped.
   if (event.data.source === 'FLOW_ACCESS_EVENT' && event.data.event === 'AWAY_WIPE') {
     handleAwayWipe();
+    return;
+  }
+  // New-tab push from the extension: the user hit Chrome's start page —
+  // END the session outright (not just a pause).
+  if (event.data.source === 'FLOW_ACCESS_EVENT' && event.data.event === 'NEW_TAB_END') {
+    handleNewTabEnd();
     return;
   }
   if (event.data.source !== 'FLOW_ACCESS_EXTENSION_REPLY') return;
