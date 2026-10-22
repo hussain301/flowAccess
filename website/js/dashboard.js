@@ -664,24 +664,44 @@ async function loadUsageData(sessionsSnap = null) {
   try {
     // Server-anchored "now" — device-clock tampering can't shrink usage.
     const now = new Date(serverNowMs());
-    const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-    
+
     const q = query(collection(db, 'sessions'), where('userId', '==', currentUser.uid));
     const snapshot = sessionsSnap || await getDocs(q);
     let totalUsedMs = 0;
 
     if (historyTableBody) historyTableBody.innerHTML = '';
     
-    // Filter last 24h client-side, skip AdminReset sessions
-    const sessions = [];
+    // Fixed 24h window — NOT a rolling sum. The old rolling logic only
+    // freed each segment 24h after IT started, so the quota trickled
+    // back piece by piece and an active user never saw a full reset.
+    // Now the window opens at the first session after the previous
+    // window expired, and the FULL quota resets at once when 24h have
+    // passed since that first session.
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const allSessions = [];
     snapshot.forEach(d => {
       const data = d.data();
       if (data.status === 'AdminReset') return; // Skip admin-reset sessions
-      const startMs = data.startedAt?.toMillis ? data.startedAt.toMillis() : 0;
-      if (startMs > twentyFourHoursAgo.getTime()) {
-        sessions.push({ id: d.id, data, startMs });
-      }
+      const startMs = data.startedAt?.toMillis ? data.startedAt.toMillis()
+        : (data.startTime?.toMillis ? data.startTime.toMillis() : 0);
+      if (startMs) allSessions.push({ id: d.id, data, startMs });
     });
+    allSessions.sort((a, b) => a.startMs - b.startMs);
+    let sessions = [];
+    let windowStartMs = 0;
+    for (const s of allSessions) {
+      if (!windowStartMs || s.startMs >= windowStartMs + DAY_MS) {
+        windowStartMs = s.startMs;
+        sessions = [s];
+      } else {
+        sessions.push(s);
+      }
+    }
+    // Window already expired → quota fully reset; old sessions (incl. a
+    // lingering Paused one) no longer count or claim the UI.
+    if (windowStartMs && now.getTime() >= windowStartMs + DAY_MS) {
+      sessions = [];
+    }
     sessions.sort((a, b) => b.startMs - a.startMs);
     
     // Sessions are newest-first — only the NEWEST Paused session may
@@ -740,7 +760,7 @@ async function loadUsageData(sessionsSnap = null) {
     updateButtonStates();
     
     if (sessions.length === 0) {
-      if (historyTableBody) historyTableBody.innerHTML = '<tr><td colspan="3" class="text-center">No sessions in the last 24 hours</td></tr>';
+      if (historyTableBody) historyTableBody.innerHTML = '<tr><td colspan="3" class="text-center">No sessions in the current 24-hour window</td></tr>';
     }
   } catch (error) {
     console.error("Error loading usage:", error);
