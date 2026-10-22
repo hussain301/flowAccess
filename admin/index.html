@@ -515,29 +515,43 @@ async function loadUsers() {
     // stable order: email ascending
     allUsersCache.sort((a, b) => (a.data.email || '').localeCompare(b.data.email || ''));
 
-    // Usage ke liye SIRF last-24h sessions — poori history kabhi nahi parhte
-    const dayAgo = Timestamp.fromDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    // Usage ke liye last-48h sessions (fixed 24h window ka pichla anchor
+    // 24h se purana ho sakta hai) — poori history kabhi nahi parhte
+    const dayAgo = Timestamp.fromDate(new Date(Date.now() - 48 * 60 * 60 * 1000));
     const sSnap = await getDocs(query(collection(db, 'sessions'), where('startTime', '>=', dayAgo)));
     userUsageCache = {};
     const nowMs = Date.now();
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const perUserSegs = {};
     sSnap.forEach(d => {
       const s = d.data();
       if (!s.userId || s.status === 'AdminReset') return;
+      const startMs = s.startTime && s.startTime.toMillis ? s.startTime.toMillis()
+        : (s.startedAt && s.startedAt.toMillis ? s.startedAt.toMillis() : 0);
+      if (!startMs) return;
       let dur = s.durationMs || 0;
       if (s.status === 'Active') {
         // Live accrual — dashboard ka formula: chalte session ka stored
         // durationMs pause/end tak 0 rehta hai, is liye now - start.
         // Stale (mara hua browser): last heartbeat + 10 min grace par cap,
         // taake abandoned session usage ko inflate na kare.
-        const startMs = s.startTime && s.startTime.toMillis ? s.startTime.toMillis()
-          : (s.startedAt && s.startedAt.toMillis ? s.startedAt.toMillis() : 0);
         const hbMs = s.lastHeartbeat && s.lastHeartbeat.toMillis ? s.lastHeartbeat.toMillis() : 0;
-        if (startMs) {
-          const endMs = (hbMs && nowMs - hbMs > 10 * 60 * 1000) ? hbMs + 10 * 60 * 1000 : nowMs;
-          dur = Math.max(dur, Math.max(0, endMs - startMs));
-        }
+        const endMs = (hbMs && nowMs - hbMs > 10 * 60 * 1000) ? hbMs + 10 * 60 * 1000 : nowMs;
+        dur = Math.max(dur, Math.max(0, endMs - startMs));
       }
-      userUsageCache[s.userId] = (userUsageCache[s.userId] || 0) + dur;
+      (perUserSegs[s.userId] = perUserSegs[s.userId] || []).push({ startMs, dur });
+    });
+    // Dashboard wala FIXED 24h window: window pehle session se khulta
+    // hai, 24h baad poora usage ek saath reset (rolling sum nahi).
+    Object.keys(perUserSegs).forEach(uid => {
+      const segs = perUserSegs[uid].sort((a, b) => a.startMs - b.startMs);
+      let ws = 0, used = 0;
+      for (const seg of segs) {
+        if (!ws || seg.startMs >= ws + DAY_MS) { ws = seg.startMs; used = seg.dur; }
+        else used += seg.dur;
+      }
+      if (ws && nowMs >= ws + DAY_MS) used = 0;
+      userUsageCache[uid] = used;
     });
 
     renderUsersPage();
